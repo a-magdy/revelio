@@ -4,7 +4,7 @@
 
 ## Overview
 
-Revelio is a standalone host dependency audit CLI for macOS. It inventories installed packages across every major package manager, checks for outdated versions, and cross-references findings against multiple vulnerability databases — all in a single Bash script with no runtime dependencies beyond `jq` and `curl`.
+Revelio is a standalone host dependency audit CLI for macOS. It inventories installed packages across every major package manager, checks for outdated versions, and cross-references findings against multiple vulnerability databases — all in a Bash 4+ script with runtime dependencies on `jq` and `curl`.
 
 ## Repository Map
 
@@ -27,6 +27,7 @@ Revelio is a standalone host dependency audit CLI for macOS. It inventories inst
 ## Architecture
 
 - `revelio.sh` is the CLI entrypoint. It parses commands and delegates to functions in `lib/security.sh`.
+- `revelio.sh` fails fast on unsupported Bash versions and tells users to install modern Bash with Homebrew.
 - `lib/security.sh` is the core library. Public API starts with `security_`; private helpers start with `_security_`.
 - `lib/core.sh` and `lib/file.sh` are lightweight standalone helpers with no external dependencies. `security.sh` self-sources them if not already loaded.
 - Config is resolved via `security_build_effective_config`: bundled `revelio.config.json` → optional user config file → CLI flag overrides.

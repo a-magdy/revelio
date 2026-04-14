@@ -1,77 +1,80 @@
 # revelio
 
-Standalone host dependency audit CLI.
+**Host-level dependency audit CLI for macOS.**
 
-## Design highlights
+Revelio inventories the tools installed on your machine, checks what is outdated, correlates findings across multiple vulnerability sources, and tells you which top-level package is responsible. It is designed for the stuff project-scoped scanners miss: global CLIs, language toolchains, package-manager installs, and transitive dependencies already living on your laptop.
 
-### npm release-channel enrichment
+## Why use it
 
-The most distinctive feature — not found in other security tools.
+- **Host-scoped, not project-scoped**: scans what is actually installed across Homebrew, npm globals, pip, pipx, uv, cargo, gems, Go tools, and dotnet tools.
+- **One report, not five**: combines OSV, npm audit, pip-audit, cargo-audit, and Grype, then deduplicates overlapping findings.
+- **Actionable remediation context**: attributes vulnerable transitive packages back to the parent or root package you can actually upgrade.
+- **Useful even offline**: inventory mode works without network lookups.
+- **No service required**: standalone Bash CLI with no cloud account or daemon.
 
-When a transitive npm vulnerability cannot be fixed by a direct upgrade (because your root package is already on the latest stable release), revelio does not just report it as a dead-end `no-fix-released`. Instead, it:
+## What ships today
 
-1. Identifies which root package owns the vulnerable transitive dependency
-2. Confirms the root is on the latest stable release via `npm view dist-tags`
-3. Scans all active pre-release channels (`beta`, `rc`, `alpha`, `next`, `canary`) for newer root versions
-4. For each candidate pre-release, traverses the full dependency path through the npm registry to check whether the vulnerable transitive dep would be resolved to a fixed version
-5. If found, classifies the advisory as `upstream-pending-release` with the specific release tag, version, and resolved-dep version
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Host inventory across major package managers | Yes | Produces inventory artifacts under `~/.revelio/<run-id>/` by default |
+| Outdated package checks | Yes | Per-manager outdated summaries are included in the run output |
+| Vulnerability aggregation + deduplication | Yes | OSV, npm audit, pip-audit, cargo-audit, Grype |
+| Parent / root package attribution | Yes | Helps explain which direct install owns a vulnerable transitive dep |
+| `why <package>` reverse dependency tracing | Yes | Supports multiple package managers |
+| Report rendering from existing artifacts | Yes | `report` summarizes the latest or a specific run |
+| Scheduled runs | Not yet | Planned |
+| Bulk upgrade workflows | Not yet | Planned |
+| Roll back to an older safer version | Not yet | Planned |
+| Compare two reports over time | Not yet | Planned |
 
-This eliminates alert fatigue on "known transitive vulnerability waiting on upstream" — you see exactly which release channel will fix it, rather than a generic open advisory on every run.
+## Quick start
 
-The relevant config key is `scanners.npmReleaseChannelChecks` (default: `true`). The output fields are `remediationStatus`, `pendingReleaseTag`, `pendingReleaseVersion`, and `pendingResolvedVersion` in `advisories.json`.
+### Requirements
 
-### Cross-scanner deduplication
+- macOS
+- Bash 4 or newer (`brew install bash`; macOS's bundled Bash 3.2 is not supported)
+- `jq`
+- `curl`
 
-Five scanners (OSV, npm audit, pip-audit, cargo-audit, Grype) can all find the same CVE. revelio deduplicates findings by canonical identity `(manager, ecosystem, package, id, dependencyPath)` and merges `sourceScanners` arrays — one advisory per package, not five duplicate alerts per run.
+Optional scanners and manager CLIs improve coverage when present, including `brew`, `npm`, `pip`, `pipx`, `uv`, `cargo`, `go`, `dotnet`, `pip-audit`, `cargo-audit`, and `grype`.
 
-### NDJSON streaming pipeline
+Revelio fails fast on unsupported Bash versions and prints a Homebrew install hint instead of breaking later on Bash 4-only features.
 
-Inventory collectors and scanners append NDJSON to shared `.ndjson` files as they run, rather than building in-memory arrays. A final `jq -s` pass consolidates each file into JSON. This keeps individual operations composable, lets any collector fail without corrupting others, and avoids memory pressure on large package sets.
-
-### Runtime environment isolation
-
-Before any package-manager commands run, all tool-specific caches are redirected into a per-run `runtime-cache/` directory inside the run output folder (`NPM_CONFIG_CACHE`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`, `GEM_SPEC_CACHE`, `GRYPE_DB_CACHE_DIR`, etc.). Update notifications and analytics are suppressed for all managers. No side effects to your global tool state.
-
-### Subshell execution model
-
-The entire scan execution runs inside a subshell (`if ! ( ... ); then`). Failures abort cleanly, partial artifacts are preserved at the run directory for debugging, and the function returns a clean non-zero exit without leaking intermediate state.
-
-### Parent attribution at every layer
-
-For each vulnerable finding, revelio resolves `primaryParent` (the immediate requiring package), `responsibleParents` (all packages that depend on the vulnerable dep), and `rootPackage` (the top-level direct install that owns the transitive chain). This tells you exactly which `brew upgrade` or `npm install -g` to run — not just which CVE to look up.
-
-### `why <package>` — reverse dependency tracing
-
-`revelio.sh why <pkg>` resolves the install reason for any package across all supported managers. For Homebrew it uses `brew uses --installed` and `brew deps --direct`; for gems, `gem dependency --reverse-dependencies`; for npm, the global dependency tree; for pip, `pip show`'s `Required-by` field. No graph database — pure native package manager queries.
-
-### Smoke-tested
-
-`ci-smoke.sh` runs `help`, `inventory --offline`, `report`, a best-effort `why jq --manager brew` check (skipped when `jq` is not installed via Homebrew), and `init-config`, then validates that `report.json` was produced, has the correct `mode`, and that advisory objects carry all required remediation and evidence fields. Run it before committing changes.
-
-## Quick usage
+### Run it
 
 ```bash
+# If `bash` still resolves to macOS's old /bin/bash, invoke the Homebrew one directly
+# "$(brew --prefix)/bin/bash" ./revelio.sh scan
+
 # Full host dependency scan
 ./revelio.sh scan
 
-# Inventory only (no vulnerability lookups)
+# Inventory only, with no network lookups
 ./revelio.sh inventory --offline
 
-# Show summary for the latest run
+# Read the latest report, or a specific run
 ./revelio.sh report
-
-# Show summary for a specific run
 ./revelio.sh report ~/.revelio/<run-id>
 
-# Find out why a package is installed
+# Explain why something is installed
 ./revelio.sh why openssl@3
 ./revelio.sh why nokogiri --manager gem
 
-# Create a starter config
+# Create a starter config in the current directory
 ./revelio.sh init-config
 ```
 
-## Common options (scan/inventory)
+## Core commands
+
+| Command | Purpose |
+| --- | --- |
+| `scan` | Inventory + outdated checks + vulnerability checks |
+| `inventory` | Inventory only; skips vulnerability lookups |
+| `report [path]` | Render a terminal summary for the latest or specified run. Respects `--output-dir` and `--config` for locating runs |
+| `why <package>` | Show why a package is installed and who depends on it. Use `--manager <mgr>` to limit search; without it, all managers are searched |
+| `init-config [path]` | Write a starter config file |
+
+### Common options
 
 - `--config <path>`
 - `--output-dir <path>`
@@ -81,168 +84,135 @@ For each vulnerable finding, revelio resolves `primaryParent` (the immediate req
 - `--no-fail` / `--fail`
 - `--fail-on-scanner-errors` / `--no-fail-on-scanner-errors`
 
-Artifacts default to: `~/.revelio`.
+## What a run produces
 
-## Report command
+Each run writes a timestamped directory under `~/.revelio/<run-id>/` unless you override `defaults.outputDir`.
 
-`report` defaults to the latest report when no path is given. Use `--output-dir` or `--config` to override where it looks.
+Key artifacts:
 
-## Why command
+- `report.json` - top-level summary and policy result
+- `inventory/packages.json` - normalized package inventory
+- `outdated/items.json` - outdated package records
+- `scans/findings.json` - raw vulnerability findings
+- `scans/advisories.json` - deduplicated, enriched remediation view
 
-`why <package>` shows why a package is installed — whether it is a direct install or a
-transitive dependency, plus the list of parent packages that depend on it.
+Each advisory in `advisories.json` carries:
 
-Options:
-- `--manager <mgr>` — limit search to a specific package manager (e.g., `brew`, `gem`, `pip`, `npm`)
+- `evidenceSources` — which scanners found this (e.g., `["osv","npm-audit"]`)
+- `remediationStatus` — `actionable-update-now`, `upstream-pending-release`, or `no-fix-released`
+- `remediationMessage` — human-readable guidance
+- `recommendedVersion` and `upgradeCommand` — what to run
+- `primaryParent` and `responsibleParents` — which direct installs own the vulnerable transitive dep
+- npm release-channel fields when applicable: `rootPackage`, `pendingReleaseTag`, `pendingReleaseVersion`
 
-When no manager is specified, all supported managers are searched.
+## Design details
 
-## Inventory enrichment
+### Parent attribution
 
-The package inventory now includes two additional fields per package:
+For each vulnerable transitive dependency, Revelio resolves the immediate parent (`primaryParent`), all depending packages (`responsibleParents`), and the top-level direct install (`rootPackage`). This tells you which `brew upgrade` or `npm install -g` to run rather than which CVE to look up.
 
-- `installType` — `direct`, `dependency`, `default`, or `unknown`
-- `parentPackages` — JSON array of parent package names (sorted, unique)
+### Remediation status and npm release-channel enrichment
 
-Manager-specific resolution:
-- **Homebrew**: `brew leaves` for direct formulae, `brew deps --installed` for dependency graph
-- **npm**: depth-based (1=direct, >1=dependency), parent from dependency path
-- **Ruby gems**: `gem dependency --reverse-dependencies` for dependency chains, `default:` marker
-- **pip**: `pip show` batch with `Required-by` field parsing
-- **pipx / uv / cargo / go / dotnet**: always `direct` (top-level by nature)
+Each advisory carries a `remediationStatus`:
 
-## Advisory output details
+- `actionable-update-now` — a stable fix exists
+- `upstream-pending-release` — fix is available on a prerelease channel
+- `no-fix-released` — no upstream fix yet
 
-`scans/advisories.json` includes enriched remediation metadata per vulnerable package:
+For npm globals, when the root package is already on the latest stable release and the transitive vulnerability has no stable-channel fix, Revelio scans active prerelease dist-tags (`beta`, `rc`, `next`, etc.) and checks whether the candidate resolves the vulnerable dependency to a patched version. If so, the advisory is classified as `upstream-pending-release` with the specific release tag and version, so you know whether to wait rather than seeing an open advisory on every run.
 
-- `evidenceSources` (merged scanner provenance, e.g. `["osv","npm-audit"]`)
-- `recommendedVersion` and `upgradeRationale`
-- `upgradeCommand` (manager-aware suggested command)
-- `primaryParent` and `responsibleParents` (best-effort parent dependency attribution)
-- `remediationStatus` and `remediationMessage`:
-  - `actionable-update-now`
-  - `upstream-pending-release` (hang-tight guidance)
-  - `no-fix-released`
-- npm release-channel context fields:
-  - `rootPackage`, `rootInstalledVersion`, `rootLatestVersion`, `rootIsLatest`
-  - `pendingReleaseTag`, `pendingReleaseVersion`, `pendingResolvedVersion`
+### Cross-scanner fusion
 
-The CLI report summary (`revelio.sh scan` and `... report`) also prints parent-package attribution, remediation status, suggested upgrade commands, and a dedicated **hang tight** section when pending-release evidence is detected.
+Five scanners can report the same CVE. Revelio deduplicates by canonical identity `(manager, ecosystem, package, id, dependencyPath)` and merges `evidenceSources` arrays — one advisory per finding, not five.
 
-### Relevant config keys
+### Runtime isolation
 
-- `scanners.npmReleaseChannelChecks` (default: `true`) — enable npm dist-tag release-channel enrichment used for pending-release detection.
+Package-manager caches and scanner state are redirected into the run directory so scans do not affect your normal tool state.
+
+## Configuration highlights
+
+`revelio.config.json` controls run behavior. Important defaults:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `defaults.outputDir` | `~/.revelio` | Root directory for run artifacts |
+| `defaults.severityThreshold` | `high` | Minimum severity that triggers failure policy |
+| `defaults.failOnFindings` | `true` | Exit non-zero when findings meet the threshold |
+| `defaults.failOnScannerErrors` | `true` | Exit non-zero when enabled collectors or scanners fail |
+| `defaults.deepScan` | `false` | Adds deep Grype filesystem targets |
+| `defaults.allowNetworkQueries` | `true` | Enables OSV and related network lookups |
+| `scanners.npmReleaseChannelChecks` | `true` | Enables npm prerelease-channel remediation enrichment |
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    CLI["revelio.sh &lt;command&gt;"]
+    CLI["revelio.sh <command>"]
+    CLI --> SCAN["scan"]
+    CLI --> INV["inventory"]
+    CLI --> REPORT["report"]
+    CLI --> WHY["why <package>"]
 
-    CLI --> CMD_SCAN["scan"]
-    CLI --> CMD_INV["inventory --offline"]
-    CLI --> CMD_WHY["why &lt;package&gt;"]
-    CLI --> CMD_REPORT["report"]
-    CLI --> CMD_INIT["init-config"]
-
-    %% ── Why command ──────────────────────────────────────────
-    subgraph why_cmd ["Why Command"]
-        direction TB
-        W1["Load latest inventory.json"]
-        W2["Search by name / --manager"]
-        W3["Show installType + parentPackages"]
-        W1 --> W2 --> W3
-    end
-    CMD_WHY --> W1
-
-    %% ── Phase 1: Collect Inventory ───────────────────────────
-    CMD_SCAN & CMD_INV --> P1
-
-    subgraph P1 ["① Collect Inventory — parallel"]
-        PM_BREW["Homebrew\nbrew list · leaves · deps"]
-        PM_NPM["npm\nnpm list -g"]
-        PM_GEM["Ruby gems\ngem list · dependency"]
-        PM_PIP["pip\npip list · show"]
-        PM_OTHER["pipx · uv · cargo\ngo · dotnet"]
-    end
-
-    P1 --> ENRICH1["Enrich each package\ninstallType · parentPackages"]
-    ENRICH1 --> INV[("inventory.json")]
-
-    %% ── Phase 2: Outdated (scan only) ────────────────────────
-    INV -->|scan| P2["② Outdated Check\nper-manager latest versions"]
-    P2 --> OUTDATED[("outdated.json")]
-
-    %% ── Phase 3: Vulnerability Scan (scan only) ──────────────
-    INV -->|scan| P3
-
-    subgraph P3 ["③ Vulnerability Scan — online"]
-        S_OSV["OSV DB"]
-        S_NPM["npm audit"]
-        S_PIP["pip-audit"]
-        S_CARGO["cargo-audit"]
-        S_GRYPE["Grype\n--deep-scan"]
-    end
-
-    %% ── Phase 4: Fusion ──────────────────────────────────────
-    P3 --> FUSION["④ Cross-scanner Fusion\nDeduplicate by manager + pkg + version\nMerge evidenceSources"]
-
-    %% ── Phase 5: Enrichment ──────────────────────────────────
-    FUSION --> ENRICH2["⑤ Advisory Enrichment"]
-
-    ENRICH2 --> E_CMD["Upgrade command\nmanager-aware"]
-    ENRICH2 --> E_PARENT["Parent attribution\nprimaryParent · responsibleParents"]
-    ENRICH2 --> E_STATUS["Remediation status"]
-
-    E_STATUS --> RS_NOW["actionable-update-now\nstable fix exists"]:::good
-    E_STATUS --> RS_WAIT["upstream-pending-release\nhang tight"]:::warn
-    E_STATUS --> RS_NONE["no-fix-released\nno upstream fix"]:::bad
-
-    E_CMD & E_PARENT & E_STATUS --> ADV[("advisories.json")]
-
-    %% ── Report assembly ──────────────────────────────────────
-    INV & OUTDATED & ADV --> REPORT[("report.json")]:::output
-
-    REPORT --> CMD_REPORT
-    CMD_REPORT --> TERMINAL["Terminal Summary\nseverity counts · parent attribution\nupgrade commands · hang-tight section"]:::output
-
-    %% ── Styles ───────────────────────────────────────────────
-    classDef good fill:#a6e3a1,color:#1e1e2e,stroke:#a6e3a1
-    classDef warn fill:#f9e2af,color:#1e1e2e,stroke:#f9e2af
-    classDef bad fill:#f38ba8,color:#1e1e2e,stroke:#f38ba8
-    classDef output fill:#cba6f7,color:#1e1e2e,stroke:#cba6f7
-
-    style CLI fill:#1e1e2e,color:#cdd6f4,stroke:#89b4fa
-    style P1 fill:#1e1e2e,color:#89dceb,stroke:#313244
-    style P3 fill:#1e1e2e,color:#89dceb,stroke:#313244
-    style why_cmd fill:#1e1e2e,color:#89dceb,stroke:#313244
-    style ENRICH1 fill:#313244,color:#cdd6f4,stroke:#89dceb
-    style P2 fill:#313244,color:#cdd6f4,stroke:#89dceb
-    style FUSION fill:#313244,color:#cdd6f4,stroke:#89dceb
-    style ENRICH2 fill:#313244,color:#cdd6f4,stroke:#89dceb
+    SCAN --> COLLECT["Collect inventory across managers"]
+    INV --> COLLECT
+    SCAN --> OUTDATED["Check outdated versions"]
+    SCAN --> VULNS["Run vulnerability scanners"]
+    VULNS --> FUSION["Deduplicate and enrich advisories"]
+    OUTDATED --> BUILD["Build report.json"]
+    FUSION --> BUILD
+    COLLECT --> BUILD
 ```
 
-## How revelio compares to other tools
+## Roadmap
 
-Most security tools are **project-scoped** — they scan a `package.json`, `Gemfile`, or `requirements.txt`. revelio is **host-scoped**: it audits the packages actually installed on your machine across every package manager in one run.
+These are **planned ideas**, not current CLI features.
+
+### Scheduled runs on macOS
+
+- Install a LaunchAgent so Revelio can run at login and on a daily schedule
+- Make cadence configurable
+- Allow enabling or disabling scheduled scans from config and, later, a dedicated CLI command
+- Write reports to the normal output directory so scheduled and manual runs share the same artifact model
+
+### Bulk upgrade assistance
+
+- Generate manager-aware upgrade suggestions for multiple actionable advisories in one pass
+- Prefer dry-run or confirmation-first workflows over silent changes
+- Keep remediation tied to the advisory output so users know why each upgrade is recommended
+
+### Roll back to an older safer version
+
+- Explore safer-version guidance for ecosystems that support explicit version installs
+- Treat this as a constrained workflow, not a blanket "downgrade everything" action
+- Preserve auditability so users can see what changed and why
+
+### Compare reports over time
+
+- Add a command to compare two `report.json` files or run directories
+- Highlight new findings, resolved findings, package version drift, and policy changes
+- Use the existing per-run artifact layout as the comparison input
+
+## Comparison to common tools
+
+Most security scanners are **project-scoped**. Revelio is **host-scoped**: it audits packages already installed on the machine, across package managers, in one run.
 
 | Feature | revelio | Trivy | Grype | Snyk | OSV-scanner |
-|---|---|---|---|---|---|
-| Host-level (not project-based) | ✅ | ⚠️ filesystem/image scan, not pkg-mgr APIs | ⚠️ filesystem/image scan, not pkg-mgr APIs | ❌ requires project context | ❌ |
-| Multi-ecosystem in one run (brew/npm/pip/pipx/uv/cargo/gems/go/dotnet) | ✅ | ❌ no brew/gems/go native support | ❌ no brew/gems/go native support | ⚠️ per-project, account required | ❌ |
-| Cross-scanner fusion with deduplication | ✅ OSV + npm audit + pip-audit + cargo-audit + grype | ❌ | ❌ | ❌ | ❌ |
-| Transitive dependency attribution (`primaryParent`, `responsibleParents`) | ✅ | ❌ | ❌ | ⚠️ paid tier | ❌ |
-| Remediation status (`actionable-update-now` / `upstream-pending-release` / `no-fix-released`) | ✅ | ❌ | ❌ | ⚠️ paid tier | ❌ |
-| `why <pkg>` dependency graph tracing | ✅ | ❌ | ❌ | ❌ | ❌ |
-| No account or cloud required | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Zero runtime to install (pure Bash) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| --- | --- | --- | --- | --- | --- |
+| Host-level package-manager inventory | Yes | Partial | Partial | No | No |
+| Multi-ecosystem host scan in one run | Yes | No | No | Partial | No |
+| Cross-scanner deduplication | Yes | No | No | No | No |
+| Parent package attribution | Yes | No | No | Partial | No |
+| No account required | Yes | Yes | Yes | No | Yes |
+| Bash-native workflow | Yes | No | No | No | No |
 
-> ⚠️ = partial/conditional support. Trivy and Grype excel at container and filesystem scanning but query files on disk rather than native package manager databases — they don't enumerate `brew list`, `gem list`, `pip list`, or `go env` output. Snyk supports multiple ecosystems but requires a project manifest and an account; it does not scan your global host environment.
+Trivy and Grype scan filesystem paths and container images but do not query native package-manager APIs (`brew list`, `gem list`, `pip list`, etc.), so host-level coverage is partial. Snyk requires a project manifest and an account; it does not scan global host environments.
 
-### Key differentiators
+## Development notes
 
-- **Host-level scanning** — audits your actual machine environment, not a project lockfile. Catches vulnerabilities in globally installed tools (CLI utilities, language runtimes, build tools) that project-level scanners miss entirely.
-- **Multi-scanner fusion** — runs OSV, npm audit, pip-audit, cargo-audit, and Grype in a single pass and deduplicates findings by canonical identity across all sources, so you see one advisory per package — not five duplicate alerts.
-- **Parent attribution** — for each vulnerable transitive dependency, revelio identifies which top-level package is responsible, so you know which direct install to upgrade rather than hunting through the dependency graph yourself.
-- **Actionable remediation** — each finding carries a `remediationStatus` (`actionable-update-now`, `upstream-pending-release`, `no-fix-released`), a suggested upgrade command, and npm release-channel context so you know whether to act now or wait.
-- **Bash-native, zero setup** — a single shell script with no language runtime, no daemon, no cloud account needed. Works offline for inventory-only runs.
+### Smoke checks
+
+```bash
+./ci-smoke.sh
+```
+
+That script runs `shellcheck`, exercises the CLI entrypoints, and validates that a report is produced with the expected shape.

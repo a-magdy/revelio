@@ -30,6 +30,21 @@ set -euo pipefail
 #   --help                Show help
 #===================================================================================================
 
+# Require Bash 4+ because Revelio uses features such as namerefs and
+# associative arrays that are not available in macOS's bundled Bash 3.2.
+_require_supported_bash() {
+  if [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
+    printf '❌ Revelio requires Bash 4 or newer. macOS ships Bash %s.\n' "${BASH_VERSION:-unknown}" >&2
+    printf '   Install a supported version with: brew install bash\n' >&2
+    printf '   Then run Revelio with that Bash or put it earlier in your PATH.\n' >&2
+    return 1
+  fi
+
+  return 0
+}
+
+_require_supported_bash || exit 1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=lib/security.sh
