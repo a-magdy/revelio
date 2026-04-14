@@ -1,0 +1,45 @@
+{
+  "defaults": {
+    "outputDir": "~/.revelio",
+    "severityThreshold": "high",
+    "failOnFindings": true,
+    "failOnScannerErrors": true,
+    "deepScan": false,
+    "allowNetworkQueries": true,
+    "osvBatchSize": 200,
+    "osvDetailDelay": 0.1
+  },
+  "inventory": {
+    "homebrew": true,
+    "npmGlobal": true,
+    "pythonPip": true,
+    "pipx": true,
+    "uvTools": true,
+    "cargo": true,
+    "rubyGems": true,
+    "rubyGemsExcludeSystem": true,
+    "goTools": true,
+    "dotnetTools": true
+  },
+  "scanners": {
+    "outdatedChecks": true,
+    "osv": true,
+    "npmAudit": true,
+    "npmReleaseChannelChecks": true,
+    "pipAudit": true,
+    "cargoAudit": true,
+    "grype": true,
+    "grypeTargets": [
+      "/opt/homebrew/Cellar",
+      "/usr/local/Cellar",
+      "~/.npm-global/lib/node_modules",
+      "~/.local/pipx/venvs",
+      "~/.cargo/bin",
+      "~/go/bin"
+    ],
+    "grypeDeepTargets": [
+      "/Applications",
+      "~/Applications"
+    ]
+  }
+}
