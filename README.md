@@ -8,9 +8,25 @@ Revelio inventories the tools installed on your machine, checks what is outdated
 
 - **Host-scoped, not project-scoped**: scans what is actually installed across Homebrew, npm globals, pip, pipx, uv, cargo, gems, Go tools, and dotnet tools.
 - **One report, not five**: combines OSV, npm audit, pip-audit, cargo-audit, and Grype, then deduplicates overlapping findings.
-- **Actionable remediation context**: attributes vulnerable transitive packages back to the parent or root package you can actually upgrade.
+- **Actionable remediation context**: attributes vulnerable transitive packages back to the parent or root package you can actually upgrade, with status, rationale, and suggested commands.
 - **Useful even offline**: inventory mode works without network lookups.
 - **No service required**: standalone Bash CLI with no cloud account or daemon.
+
+## How it compares
+
+Most security scanners are **project-scoped**. Revelio is **host-scoped**: it audits packages already installed on the machine, across package managers, in one run.
+
+| Feature | revelio | Trivy | Grype | Snyk | OSV-scanner |
+| --- | --- | --- | --- | --- | --- |
+| Host-level package-manager inventory | Yes | Partial | Partial | No | No |
+| Multi-ecosystem host scan in one run | Yes | No | No | Partial | No |
+| Cross-scanner deduplication | Yes | No | No | No | No |
+| Parent package attribution | Yes | No | No | Partial | No |
+| Remediation status guidance | Yes | No | No | Partial | No |
+| No account required | Yes | Yes | Yes | No | Yes |
+| Bash-native workflow | Yes | No | No | No | No |
+
+Trivy and Grype are strong filesystem and container scanners, but they do not enumerate native package-manager data such as `brew list`, `gem list`, `pip list`, or `go env`, so host-package coverage is only partial. Snyk supports multiple ecosystems, but it expects project context and an account rather than a purely local host audit workflow.
 
 ## What ships today
 
@@ -39,6 +55,15 @@ Revelio inventories the tools installed on your machine, checks what is outdated
 Optional scanners and manager CLIs improve coverage when present, including `brew`, `npm`, `pip`, `pipx`, `uv`, `cargo`, `go`, `dotnet`, `pip-audit`, `cargo-audit`, and `grype`.
 
 Revelio fails fast on unsupported Bash versions and prints a Homebrew install hint instead of breaking later on Bash 4-only features.
+
+### Installation
+
+```bash
+git clone https://github.com/a-magdy/revelio.git
+cd revelio
+```
+
+No build step required. The CLI runs directly from the repository.
 
 ### Run it
 
@@ -84,37 +109,28 @@ Revelio fails fast on unsupported Bash versions and prints a Homebrew install hi
 - `--no-fail` / `--fail`
 - `--fail-on-scanner-errors` / `--no-fail-on-scanner-errors`
 
-## Report command
-
-`report` defaults to the latest report when no path is given. Use `--output-dir` or `--config` to override where it looks for runs.
-
-## Why command
-
-`why <package>` shows why a package is installed, whether it is a direct install or a transitive dependency, plus the parent packages that depend on it.
-
-When no manager is specified, all supported managers are searched.
-
 ## What a run produces
 
 Each run writes a timestamped directory under `~/.revelio/<run-id>/` unless you override `defaults.outputDir`.
 
 Key artifacts:
 
-- `report.json` - top-level summary and policy result
-- `inventory/packages.json` - normalized package inventory
-- `outdated/items.json` - outdated package records
-- `scans/findings.json` - raw vulnerability findings
-- `scans/advisories.json` - deduplicated, enriched remediation view
+- `report.json` — top-level summary and policy result
+- `inventory/packages.json` — normalized package inventory
+- `outdated/items.json` — outdated package records
+- `scans/findings.json` — raw vulnerability findings
+- `scans/advisories.json` — deduplicated, enriched remediation view
 
 Each advisory in `advisories.json` carries:
 
 - `evidenceSources` — which scanners found this (e.g., `["osv","npm-audit"]`)
-- `remediationStatus` — `actionable-update-now`, `upstream-pending-release`, or `no-fix-released`
+- `remediationStatus` — whether a fix is available now, pending release, or not yet released
 - `remediationMessage` — human-readable guidance
 - `recommendedVersion` and `upgradeRationale` — why the suggested target was chosen
 - `upgradeCommand` — what to run
 - `primaryParent` and `responsibleParents` — which direct installs own the vulnerable transitive dep
-- npm release-channel fields when applicable: `rootPackage`, `rootInstalledVersion`, `rootLatestVersion`, `rootIsLatest`, `pendingReleaseTag`, `pendingReleaseVersion`, `pendingResolvedVersion`
+- npm release-channel fields when applicable: `rootPackage`, `rootInstalledVersion`, `rootLatestVersion`, `rootIsLatest`
+- npm pending-release fields: `pendingReleaseTag`, `pendingReleaseVersion`, `pendingResolvedVersion`
 
 The CLI report summary also prints parent-package attribution, remediation status, suggested upgrade commands, and a dedicated hang-tight section when pending-release evidence is present.
 
@@ -165,7 +181,7 @@ Package-manager caches and scanner state are redirected into the run directory s
 
 The scan runs inside a subshell so failures abort cleanly, partial artifacts remain available for debugging, and the CLI can return a clean non-zero exit without leaking intermediate state.
 
-## Configuration highlights
+## Configuration
 
 `revelio.config.json` controls run behavior. Important defaults:
 
@@ -187,7 +203,7 @@ flowchart TD
     CLI --> SCAN["scan"]
     CLI --> INV["inventory --offline"]
     CLI --> WHY["why <package>"]
-    CLI --> REPORT["report"]
+    CLI --> RPT["report"]
     CLI --> INIT["init-config"]
 
     subgraph WHY_FLOW ["Why Command"]
@@ -229,10 +245,10 @@ flowchart TD
     FUSION --> ADVISORY_ENRICH["Advisory enrichment"]
     ADVISORY_ENRICH --> ADVISORIES[("advisories.json")]
 
-    INVENTORY --> BUILD["Build report.json"]
+    INVENTORY --> BUILD["Build report"]
     OUTDATED_JSON --> BUILD
     ADVISORIES --> BUILD
-    BUILD --> REPORT
+    BUILD --> REPORT_JSON[("report.json")]
 ```
 
 ## Roadmap
@@ -264,31 +280,7 @@ These are **planned ideas**, not current CLI features.
 - Highlight new findings, resolved findings, package version drift, and policy changes
 - Use the existing per-run artifact layout as the comparison input
 
-## Comparison to common tools
-
-Most security scanners are **project-scoped**. Revelio is **host-scoped**: it audits packages already installed on the machine, across package managers, in one run.
-
-| Feature | revelio | Trivy | Grype | Snyk | OSV-scanner |
-| --- | --- | --- | --- | --- | --- |
-| Host-level package-manager inventory | Yes | Partial | Partial | No | No |
-| Multi-ecosystem host scan in one run | Yes | No | No | Partial | No |
-| Cross-scanner deduplication | Yes | No | No | No | No |
-| Parent package attribution | Yes | No | No | Partial | No |
-| Remediation status guidance | Yes | No | No | Partial | No |
-| No account required | Yes | Yes | Yes | No | Yes |
-| Bash-native workflow | Yes | No | No | No | No |
-
-Trivy and Grype are strong filesystem and container scanners, but they do not enumerate native package-manager data such as `brew list`, `gem list`, `pip list`, or `go env`, so host-package coverage is only partial. Snyk supports multiple ecosystems, but it expects project context and an account rather than a purely local host audit workflow.
-
-### Key differentiators
-
-- **Host-level scanning** — audits the machine environment, not a project lockfile
-- **Multi-scanner fusion** — consolidates multiple scanners into one remediation view
-- **Parent attribution** — identifies which top-level package owns a vulnerable transitive dependency
-- **Actionable remediation** — reports status, rationale, and suggested commands instead of raw CVE lists
-- **Bash-native workflow** — one script, no service, no account, inventory still usable offline
-
-## Development notes
+## Development
 
 ### Smoke checks
 
@@ -297,3 +289,15 @@ Trivy and Grype are strong filesystem and container scanners, but they do not en
 ```
 
 That script runs `shellcheck`, exercises `help`, `inventory --offline`, `report`, a best-effort `why jq --manager brew` check, and `init-config`, then validates that `report.json` exists with the expected shape.
+
+## Contributing
+
+Revelio is in early development. Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/a-magdy/revelio/issues). If you would like to contribute code, please open an issue first to discuss the change.
+
+## Security
+
+If you discover a vulnerability in Revelio itself, please report it privately via [GitHub Security Advisories](https://github.com/a-magdy/revelio/security/advisories/new) rather than opening a public issue.
+
+## License
+
+This project does not yet have a license. Until one is added, standard copyright applies. If you would like to use Revelio in your own work, please open an issue to discuss licensing.
