@@ -94,11 +94,18 @@ Options for scan/inventory:
                             Ignore scanner/collector failures for exit policy
   --offline                 Disable OSV/network queries
   --online                  Enable OSV/network queries
+  --quiet, -q               Suppress progress output (cron-friendly)
+  --json                    Print final report.json to stdout (skips text summary)
   --help                    Show command help
 
 Options for report:
   --config <path>           Config file (used to resolve output directory)
   --output-dir <path>       Override output directory to search for latest report
+  --format <fmt>            text|json|sarif|csv (default: text)
+  --output <path>           Write rendered report to file instead of stdout
+
+Options for init-config:
+  --force, -f               Overwrite an existing config (a .bak.<ts> backup is kept)
 
 Options for why:
   --manager <mgr>           Limit search to a specific manager (brew, gem, npm, pip, etc.)
@@ -148,6 +155,8 @@ _parse_scan_inventory_args() {
   FAIL_OVERRIDE=""
   NETWORK_OVERRIDE=""
   SCANNER_FAIL_OVERRIDE=""
+  SCAN_QUIET="false"
+  SCAN_JSON="false"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -198,6 +207,14 @@ _parse_scan_inventory_args() {
         ;;
       --online)
         NETWORK_OVERRIDE="true"
+        shift
+        ;;
+      --quiet|-q)
+        SCAN_QUIET="true"
+        shift
+        ;;
+      --json)
+        SCAN_JSON="true"
         shift
         ;;
       --help|-h)
@@ -315,8 +332,17 @@ _run_scan_or_inventory() {
     "$NETWORK_OVERRIDE" \
     "$SCANNER_FAIL_OVERRIDE")" || return 1
 
+  if [[ "$SCAN_QUIET" == "true" ]]; then
+    export REVELIO_QUIET=1
+  fi
+
   security_run "$mode" "$effective_config" || return 1
-  security_print_report_summary "$REVELIO_LAST_REPORT"
+
+  if [[ "$SCAN_JSON" == "true" ]]; then
+    jq . "$REVELIO_LAST_REPORT"
+  elif [[ "$SCAN_QUIET" != "true" ]]; then
+    security_print_report_summary "$REVELIO_LAST_REPORT"
+  fi
 
   if [[ "$mode" == "scan" ]]; then
     local policy_exit=0
@@ -331,6 +357,8 @@ _parse_report_args() {
   REPORT_PATH=""
   REPORT_CONFIG_PATH=""
   REPORT_OUTPUT_DIR=""
+  REPORT_FORMAT="text"
+  REPORT_OUTPUT=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -342,6 +370,16 @@ _parse_report_args() {
       --output-dir)
         require_param "${2:-}" "output dir" "_parse_report_args" || return 1
         REPORT_OUTPUT_DIR="$2"
+        shift 2
+        ;;
+      --format)
+        require_param "${2:-}" "format" "_parse_report_args" || return 1
+        REPORT_FORMAT="$2"
+        shift 2
+        ;;
+      --output)
+        require_param "${2:-}" "output path" "_parse_report_args" || return 1
+        REPORT_OUTPUT="$2"
         shift 2
         ;;
       --help|-h)
@@ -371,10 +409,16 @@ _run_report() {
     return "$parse_status"
   fi
 
-  local report_file
+  local report_file run_dir
 
   if [[ -n "$REPORT_PATH" ]]; then
-    report_file="$(_resolve_report_file_path "$REPORT_PATH")" || return 1
+    if [[ -d "$REPORT_PATH" && -f "$REPORT_PATH/report.json" ]]; then
+      run_dir="$REPORT_PATH"
+      report_file="$REPORT_PATH/report.json"
+    else
+      report_file="$(_resolve_report_file_path "$REPORT_PATH")" || return 1
+      run_dir="$(dirname "$report_file")"
+    fi
   else
     local config_for_resolve="${REPORT_CONFIG_PATH:-}"
     if [[ -z "$config_for_resolve" && -f "$DEFAULT_CONFIG_FILE" ]]; then
@@ -384,16 +428,49 @@ _run_report() {
     local output_dir
     output_dir="$(_resolve_output_dir "$config_for_resolve" "$REPORT_OUTPUT_DIR")"
     report_file="$(_resolve_latest_report "$output_dir")" || return 1
-    print_info "Using latest report: $report_file"
+    run_dir="$(dirname "$report_file")"
+    [[ "$REPORT_FORMAT" == "text" ]] && print_info "Using latest report: $report_file"
   fi
 
-  security_print_report_summary "$report_file"
+  case "$REPORT_FORMAT" in
+    text)
+      security_print_report_summary "$report_file"
+      ;;
+    json)
+      if [[ -n "$REPORT_OUTPUT" ]]; then
+        jq . "$report_file" > "$REPORT_OUTPUT"
+        print_success "Wrote JSON: $REPORT_OUTPUT"
+      else
+        jq . "$report_file"
+      fi
+      ;;
+    sarif)
+      security_export_sarif "$run_dir" "$REPORT_OUTPUT"
+      ;;
+    csv)
+      security_export_csv "$run_dir" "$REPORT_OUTPUT"
+      ;;
+    *)
+      print_error "Unknown report format: $REPORT_FORMAT (expected text|json|sarif|csv)"
+      return 1
+      ;;
+  esac
 }
 
 _run_init_config() {
   # Default to CWD so init-config doesn't try to overwrite the bundled repo config
-  local target_path="${1:-$PWD/revelio.config.json}"
-  security_init_config_file "$target_path"
+  local target_path="$PWD/revelio.config.json"
+  local force="false"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force="true"; shift ;;
+      --help|-h) _show_usage; return 0 ;;
+      -*)
+        print_error "Unknown init-config option: $1"; return 1 ;;
+      *) target_path="$1"; shift ;;
+    esac
+  done
+  security_init_config_file "$target_path" "$force"
 }
 
 _parse_why_args() {

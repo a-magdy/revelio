@@ -7,7 +7,8 @@
     "deepScan": false,
     "allowNetworkQueries": true,
     "osvBatchSize": 200,
-    "osvDetailDelay": 0.1
+    "osvDetailDelay": 0.1,
+    "retainRuns": 0
   },
   "inventory": {
     "homebrew": true,

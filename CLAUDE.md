@@ -61,8 +61,10 @@ Revelio is a standalone host dependency audit CLI for macOS. It inventories inst
 | `security_default_config_json` | Emit the bundled default config as JSON |
 | `security_init_config_file $path` | Create a starter config file |
 | `security_build_effective_config $cfg $out $sev $deep $fail $net $sfail` | Merge defaults + file + CLI overrides into effective config JSON |
-| `security_run $mode $effective_config_json` | Execute inventory or full scan; sets `REVELIO_LAST_REPORT` |
+| `security_run $mode $effective_config_json` | Execute inventory or full scan; sets `REVELIO_LAST_REPORT`. Honors `defaults.retainRuns` to prune old runs and traps `INT`/`TERM` to clean up background collectors |
 | `security_print_report_summary $report_file` | Render terminal summary for a report |
+| `security_export_sarif $input [$output]` | Render advisories as SARIF 2.1.0 (input may be a run dir, report.json, or advisories.json) |
+| `security_export_csv $input [$output]` | Render advisories as CSV (one row per vulnerability occurrence) |
 | `security_report_exit_code $report_file` | Return non-zero when policy requires failure |
 | `security_why_package $pkg $manager` | Show why a package is installed (reverse deps) |
 | `diff_run $baseline $candidate $format $out` | (lib/diff.sh) Compare two reports; format = text/json/markdown |

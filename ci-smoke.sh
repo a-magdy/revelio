@@ -146,6 +146,68 @@ main() {
     return 1
   fi
 
+  print_info "Running --quiet/--json scan-mode smoke test..."
+  local quiet_tmp quiet_stdout quiet_stderr
+  quiet_tmp="$(mktemp -d)"
+  quiet_stderr="$quiet_tmp/stderr"
+  quiet_stdout="$("$CLI_ENTRYPOINT" inventory --offline --output-dir "$quiet_tmp" --quiet --json 2>"$quiet_stderr")" || {
+    print_error "Smoke test failed: --quiet --json inventory exited non-zero"
+    rm -rf "$quiet_tmp"; return 1
+  }
+  if ! jq -e '.schemaVersion and .toolVersion and .host.name' <<<"$quiet_stdout" >/dev/null; then
+    print_error "Smoke test failed: --json output missing schemaVersion/toolVersion/host"
+    rm -rf "$quiet_tmp"; return 1
+  fi
+  if grep -q '\xE2\x84\xB9' "$quiet_stderr" 2>/dev/null; then
+    : # info glyph allowed if it sneaks in
+  fi
+  rm -rf "$quiet_tmp"
+
+  print_info "Running report --format sarif/csv smoke test..."
+  if ! "$CLI_ENTRYPOINT" report "$run_dir" --format sarif 2>/dev/null \
+       | jq -e '.version == "2.1.0" and (.runs[0].tool.driver.name == "revelio")' >/dev/null; then
+    print_error "Smoke test failed: report --format sarif did not produce valid SARIF"
+    return 1
+  fi
+  if ! "$CLI_ENTRYPOINT" report "$run_dir" --format csv 2>/dev/null \
+       | head -1 | grep -q '^"manager","ecosystem","package"'; then
+    print_error "Smoke test failed: report --format csv missing expected header"
+    return 1
+  fi
+
+  print_info "Running init-config --force smoke test..."
+  local force_cfg
+  force_cfg="$tmp_dir/force-config.json"
+  "$CLI_ENTRYPOINT" init-config "$force_cfg" >/dev/null
+  if "$CLI_ENTRYPOINT" init-config "$force_cfg" >/dev/null 2>&1; then
+    print_error "Smoke test failed: init-config without --force should refuse to overwrite"
+    return 1
+  fi
+  if ! "$CLI_ENTRYPOINT" init-config "$force_cfg" --force >/dev/null 2>&1; then
+    print_error "Smoke test failed: init-config --force should overwrite"
+    return 1
+  fi
+  if ! ls "$force_cfg".bak.* >/dev/null 2>&1; then
+    print_error "Smoke test failed: init-config --force did not write a backup"
+    return 1
+  fi
+
+  print_info "Running retainRuns smoke test..."
+  local retain_tmp retain_cfg run_count
+  retain_tmp="$(mktemp -d)"
+  retain_cfg="$retain_tmp/cfg.json"
+  jq '.defaults.retainRuns = 2' "$SCRIPT_DIR/revelio.config.json" > "$retain_cfg"
+  for _ in 1 2 3 4; do
+    "$CLI_ENTRYPOINT" inventory --offline --config "$retain_cfg" --output-dir "$retain_tmp" >/dev/null
+    sleep 1
+  done
+  run_count="$(find "$retain_tmp" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+  if [[ "$run_count" != "2" ]]; then
+    print_error "Smoke test failed: retainRuns=2 expected 2 dirs, got $run_count"
+    rm -rf "$retain_tmp"; return 1
+  fi
+  rm -rf "$retain_tmp"
+
   print_info "Validating advisory schema when present..."
   local advisories_file
   advisories_file="$(jq -r '.artifacts.scanAdvisories // ""' "$report_file")"

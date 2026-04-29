@@ -56,7 +56,8 @@ security_default_config_json() {
     "deepScan": false,
     "allowNetworkQueries": true,
     "osvBatchSize": 200,
-    "osvDetailDelay": 0.1
+    "osvDetailDelay": 0.1,
+    "retainRuns": 0
   },
   "inventory": {
     "homebrew": true,
@@ -120,10 +121,14 @@ JSON
 security_init_config_file() {
   require_param "${1:-}" "config_path" "security_init_config_file" || return 1
   local config_path="$1"
+  local force="${2:-false}"
 
-  if [[ -f "$config_path" ]]; then
-    print_warning "Config already exists: $config_path"
+  if [[ -f "$config_path" && "$force" != "true" ]]; then
+    print_warning "Config already exists: $config_path (use --force to overwrite)"
     return 1
+  fi
+  if [[ -f "$config_path" && "$force" == "true" ]]; then
+    cp "$config_path" "$config_path.bak.$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null || true
   fi
 
   local old_umask
@@ -284,6 +289,12 @@ security_run() {
   umask "$old_umask"
 
   if ! (
+    # Trap interrupt and termination so background collectors don't keep running
+    # after a Ctrl-C. The trap kills any direct child jobs of this subshell and
+    # then re-raises the signal so the parent shell sees the standard exit code.
+    trap '_security_handle_signal INT' INT
+    trap '_security_handle_signal TERM' TERM
+
     _security_prepare_runtime_environment "$run_dir"
 
     write_file_content "$run_dir/effective-config.json" "$config_json"
@@ -322,6 +333,75 @@ security_run() {
   REVELIO_LAST_RUN_DIR="$run_dir"
   REVELIO_LAST_REPORT="$run_dir/report.json"
   export REVELIO_LAST_RUN_DIR REVELIO_LAST_REPORT
+
+  _security_prune_old_runs "$config_json" "$output_dir" "$run_dir"
+}
+
+# Best-effort signal handler used inside the security_run subshell. Kills any
+# background jobs of the current subshell and re-raises the signal so the
+# caller sees the standard 128+N exit code.
+# $1 => signal name (INT or TERM)
+_security_handle_signal() {
+  local sig="${1:-INT}"
+  local pids
+  pids="$(jobs -p 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    # shellcheck disable=SC2086
+    kill -TERM $pids 2>/dev/null || true
+    sleep 0.5
+    # shellcheck disable=SC2086
+    kill -KILL $pids 2>/dev/null || true
+  fi
+  trap - "$sig"
+  kill -"$sig" $$ 2>/dev/null || true
+}
+
+# Prune older run directories under the output dir, keeping the N most recent.
+# Controlled by config key `defaults.retainRuns`. A value <= 0 means "keep all"
+# (current default for backwards compatibility).
+# $1 => effective config JSON
+# $2 => output dir
+# $3 => current run dir (never pruned)
+_security_prune_old_runs() {
+  local config_json="$1"
+  local output_dir="$2"
+  local current_run_dir="$3"
+
+  local keep
+  keep="$(jq -r '.defaults.retainRuns // 0' <<<"$config_json" 2>/dev/null)"
+  [[ "$keep" =~ ^[0-9]+$ ]] || keep=0
+  if [[ "$keep" -le 0 ]]; then
+    return 0
+  fi
+
+  local entries=()
+  local entry
+  while IFS= read -r entry; do
+    [[ -n "$entry" && -d "$entry" ]] || continue
+    [[ "$entry" == "$current_run_dir" ]] && continue
+    entries+=("$entry")
+  done < <(find "$output_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -r)
+
+  local total=${#entries[@]}
+  # Keep N most recent (excluding the current run, which is always kept on top).
+  # Effective ceiling for older runs is keep-1 because the current run counts.
+  local ceiling=$(( keep - 1 ))
+  [[ "$ceiling" -lt 0 ]] && ceiling=0
+
+  if [[ "$total" -le "$ceiling" ]]; then
+    return 0
+  fi
+
+  local i
+  for (( i = ceiling; i < total; i++ )); do
+    local victim="${entries[$i]}"
+    # Defensive: only prune dirs that look like revelio runs (contain report.json
+    # OR effective-config.json), to avoid nuking unrelated content if a user
+    # points outputDir somewhere shared.
+    if [[ -f "$victim/report.json" || -f "$victim/effective-config.json" ]]; then
+      rm -rf "$victim"
+    fi
+  done
 }
 
 # Render a concise terminal summary for a report file.
@@ -3199,4 +3279,209 @@ _security_compute_policy() {
   ' "$report_file")"
 
   write_file_content "$report_file" "$updated_report"
+}
+
+#===================================================================================================
+# Exporters: SARIF 2.1.0 and CSV
+#===================================================================================================
+
+# Resolve a path that may point to a run dir, a report.json, or an advisories.json.
+# Echoes the absolute advisories.json path on stdout, or returns 1 if not found.
+# $1 => input path
+_security_resolve_advisories_path() {
+  local input="$1"
+  if [[ -z "$input" ]]; then
+    return 1
+  fi
+
+  if [[ -f "$input" ]]; then
+    case "$(basename "$input")" in
+      advisories.json) printf '%s\n' "$input"; return 0 ;;
+      report.json)
+        local run_dir
+        run_dir="$(dirname "$input")"
+        if [[ -f "$run_dir/scans/advisories.json" ]]; then
+          printf '%s\n' "$run_dir/scans/advisories.json"; return 0
+        fi
+        ;;
+    esac
+  fi
+
+  if [[ -d "$input" ]]; then
+    if [[ -f "$input/scans/advisories.json" ]]; then
+      printf '%s\n' "$input/scans/advisories.json"
+      return 0
+    fi
+    # Inventory-only runs (or scan runs with zero findings) may have no
+    # advisories.json. Synthesize an empty array file in the run dir so the
+    # exporters can render valid empty output without callers special-casing it.
+    if [[ -f "$input/report.json" ]]; then
+      ensure_dir "$input/scans" 2>/dev/null || true
+      write_file_content "$input/scans/advisories.json" "[]" 2>/dev/null || true
+      if [[ -f "$input/scans/advisories.json" ]]; then
+        printf '%s\n' "$input/scans/advisories.json"
+        return 0
+      fi
+    fi
+  fi
+
+  return 1
+}
+
+# Render advisories as SARIF 2.1.0 JSON.
+# $1 => run dir, report.json, or advisories.json
+# $2 => optional output file (defaults to stdout)
+security_export_sarif() {
+  require_param "${1:-}" "input" "security_export_sarif" || return 1
+  local input="$1"
+  local out="${2:-}"
+
+  local advisories
+  advisories="$(_security_resolve_advisories_path "$input")" || {
+    print_error "Could not locate advisories.json from: $input"
+    return 1
+  }
+
+  local sarif
+  sarif="$(jq -n --slurpfile advisories "$advisories" --arg tool "revelio" --arg version "${REVELIO_VERSION:-0.0.0}" '
+    def sev_to_sarif:
+      if . == "critical" then "error"
+      elif . == "high" then "error"
+      elif . == "medium" then "warning"
+      elif . == "low" then "note"
+      else "none" end;
+
+    ($advisories[0] // []) as $list
+    | [ $list[]
+        | . as $adv
+        | (.vulnerabilities // [{id: ($adv.primaryVulnerabilityId // "REVELIO-UNKNOWN"), severity: $adv.highestSeverity, summary: ""}])[]
+        | { adv: $adv, vuln: . } ]
+    | . as $rows
+    | ($rows | map(.vuln.id) | unique) as $rule_ids
+    | {
+        version: "2.1.0",
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/Documents/CommitteeSpecificationDrafts/CSD2/sarif-schema-2.1.0.json",
+        runs: [
+          {
+            tool: {
+              driver: {
+                name: $tool,
+                version: $version,
+                informationUri: "https://github.com/a-magdy/revelio",
+                rules: [
+                  $rule_ids[]
+                  | . as $id
+                  | ($rows | map(select(.vuln.id == $id))[0]) as $sample
+                  | {
+                      id: $id,
+                      name: $id,
+                      shortDescription: { text: ($sample.vuln.summary // $id) },
+                      fullDescription:  { text: ($sample.vuln.summary // $id) },
+                      defaultConfiguration: { level: ($sample.vuln.severity // "unknown" | sev_to_sarif) },
+                      helpUri: ($sample.vuln.references[0]? // null)
+                    }
+                ]
+              }
+            },
+            results: [
+              $rows[]
+              | {
+                  ruleId: .vuln.id,
+                  level: (.vuln.severity // "unknown" | sev_to_sarif),
+                  message: { text: ((.vuln.summary // .vuln.id) + " (" + (.adv.manager // "?") + ":" + (.adv.package // "?") + "@" + (.adv.installedVersion // "?") + ")") },
+                  locations: [
+                    {
+                      logicalLocations: [
+                        {
+                          name: ((.adv.manager // "?") + ":" + (.adv.package // "?")),
+                          fullyQualifiedName: (.vuln.dependencyPath // ((.adv.manager // "?") + " > " + (.adv.package // "?"))),
+                          kind: "package"
+                        }
+                      ]
+                    }
+                  ],
+                  properties: {
+                    manager: (.adv.manager // null),
+                    ecosystem: (.adv.ecosystem // null),
+                    package: (.adv.package // null),
+                    installedVersion: (.adv.installedVersion // null),
+                    fixedVersions: (.vuln.fixedVersions // []),
+                    severity: (.vuln.severity // "unknown"),
+                    sourceScanners: (.vuln.sourceScanners // [])
+                  }
+                }
+            ]
+          }
+        ]
+      }
+  ')" || {
+    print_error "Failed to render SARIF"
+    return 1
+  }
+
+  if [[ -n "$out" ]]; then
+    write_file_content "$out" "$sarif"
+    print_success "Wrote SARIF: $out"
+  else
+    printf '%s\n' "$sarif"
+  fi
+}
+
+# Render advisories as CSV (one row per vulnerability occurrence).
+# $1 => run dir, report.json, or advisories.json
+# $2 => optional output file (defaults to stdout)
+security_export_csv() {
+  require_param "${1:-}" "input" "security_export_csv" || return 1
+  local input="$1"
+  local out="${2:-}"
+
+  local advisories
+  advisories="$(_security_resolve_advisories_path "$input")" || {
+    print_error "Could not locate advisories.json from: $input"
+    return 1
+  }
+
+  local csv
+  csv="$(jq -nr --slurpfile advisories "$advisories" '
+    def csv_field: tostring | gsub("\""; "\"\"") | "\"" + . + "\"";
+
+    [
+      "manager","ecosystem","package","installedVersion","vulnerabilityId",
+      "severity","summary","fixedVersions","dependencyPath","primaryParent",
+      "rootPackage","remediationStatus","upgradeCommand","references"
+    ]
+    | map(csv_field) | join(",")
+    , (
+      ($advisories[0] // [])[]
+      | . as $adv
+      | (.vulnerabilities // [{id: ($adv.primaryVulnerabilityId // "REVELIO-UNKNOWN"), severity: $adv.highestSeverity}])[]
+      | [
+          ($adv.manager // ""),
+          ($adv.ecosystem // ""),
+          ($adv.package // ""),
+          ($adv.installedVersion // ""),
+          (.id // ""),
+          (.severity // $adv.highestSeverity // "unknown"),
+          (.summary // ""),
+          ((.fixedVersions // []) | join(";")),
+          (.dependencyPath // ""),
+          ($adv.primaryParent // ""),
+          ($adv.rootPackage // ""),
+          ($adv.remediationStatus // ""),
+          ($adv.upgradeCommand // ""),
+          ((.references // []) | join(";"))
+        ]
+      | map(csv_field) | join(",")
+    )
+  ')" || {
+    print_error "Failed to render CSV"
+    return 1
+  }
+
+  if [[ -n "$out" ]]; then
+    write_file_content "$out" "$csv"
+    print_success "Wrote CSV: $out"
+  else
+    printf '%s\n' "$csv"
+  fi
 }

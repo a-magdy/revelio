@@ -98,12 +98,12 @@ No build step required. The CLI runs directly from the repository.
 | --- | --- |
 | `scan` | Inventory + outdated checks + vulnerability checks |
 | `inventory` | Inventory only; skips vulnerability lookups |
-| `report [path]` | Render a terminal summary for the latest or specified run. Respects `--output-dir` and `--config` for locating runs |
+| `report [path]` | Render an existing run as text (default), JSON, SARIF 2.1.0, or CSV. Use `--format text\|json\|sarif\|csv` and optional `--output <file>`. Without a path, picks the latest run from `--output-dir` |
 | `why <package>` | Show why a package is installed and who depends on it. Use `--manager <mgr>` to limit search; without it, all managers are searched |
 | `diff <a> <b>` | Compare two reports (run dirs or `report.json` paths). Buckets findings into new/resolved/unchanged and inventory into added/removed/version-drift. `--format text\|json\|markdown`, `--output <file>`, `--since <baseline>` |
 | `schedule <action>` | `install`, `uninstall`, or `status`. Backend chosen automatically: launchd on macOS, systemd-user (with cron fallback) on Linux. Options: `--cadence hourly\|daily\|weekly`, `--at HH:MM`, `--mode scan\|inventory`, `--publish` |
 | `publish [--latest\|--run <path>]` | Clone the configured git repo, copy the run artifacts under `reports/{hostname}/{run-id}/`, commit, and push. Supports `--dry-run`, `--force`, token via `REVELIO_GIT_TOKEN` (overridable in config) |
-| `init-config [path]` | Write a starter config file |
+| `init-config [path]` | Write a starter config file. Add `--force`/`-f` to overwrite an existing file (a `.bak.<timestamp>` copy is kept) |
 | `version` (`--version`/`-V`) | Print the revelio version |
 
 ### Common options
@@ -200,6 +200,7 @@ The scan runs inside a subshell so failures abort cleanly, partial artifacts rem
 | `defaults.failOnScannerErrors` | `true` | Exit non-zero when enabled collectors or scanners fail |
 | `defaults.deepScan` | `false` | Adds deep Grype filesystem targets |
 | `defaults.allowNetworkQueries` | `true` | Enables OSV and related network lookups |
+| `defaults.retainRuns` | `0` | When > 0, prune older run directories so only the N most recent are kept |
 | `scanners.npmReleaseChannelChecks` | `true` | Enables npm prerelease-channel remediation enrichment |
 | `publish.enabled` | `false` | Allow `revelio publish` to push to the configured remote |
 | `publish.repoUrl` | `""` | Git remote URL (HTTPS or SSH) |
