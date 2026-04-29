@@ -26,6 +26,10 @@ main() {
     "$CLI_ENTRYPOINT" \
     "$SCRIPT_DIR/lib/core.sh" \
     "$SCRIPT_DIR/lib/file.sh" \
+    "$SCRIPT_DIR/lib/platform.sh" \
+    "$SCRIPT_DIR/lib/diff.sh" \
+    "$SCRIPT_DIR/lib/schedule.sh" \
+    "$SCRIPT_DIR/lib/publish.sh" \
     "$SCRIPT_DIR/lib/security.sh"
 
   local tmp_dir
@@ -87,6 +91,58 @@ main() {
 
   if ! jq -e '.scanners.npmReleaseChannelChecks == true' "$generated_config" >/dev/null; then
     print_error "Smoke test failed: expected scanners.npmReleaseChannelChecks=true in generated config"
+    return 1
+  fi
+
+  print_info "Running --version smoke test..."
+  if ! "$CLI_ENTRYPOINT" --version | grep -q '^revelio '; then
+    print_error "Smoke test failed: --version did not print expected output"
+    return 1
+  fi
+
+  print_info "Running diff smoke test..."
+  local diff_tmp diff_run_a diff_run_b diff_out
+  diff_tmp="$(mktemp -d)"
+  "$CLI_ENTRYPOINT" inventory --offline --output-dir "$diff_tmp" >/dev/null
+  sleep 1
+  "$CLI_ENTRYPOINT" inventory --offline --output-dir "$diff_tmp" >/dev/null
+  diff_run_a="$(find "$diff_tmp" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)"
+  diff_run_b="$(find "$diff_tmp" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+  if [[ -z "$diff_run_a" || -z "$diff_run_b" || "$diff_run_a" == "$diff_run_b" ]]; then
+    print_error "Smoke test failed: could not produce two run dirs for diff"
+    rm -rf "$diff_tmp"
+    return 1
+  fi
+  diff_out="$("$CLI_ENTRYPOINT" diff "$diff_run_a" "$diff_run_b" --format json 2>&1)" || {
+    print_error "Smoke test failed: diff command failed"
+    rm -rf "$diff_tmp"
+    return 1
+  }
+  if ! jq -e '.findings.counts and .inventory.counts and .policy.severityThreshold' <<<"$diff_out" >/dev/null; then
+    print_error "Smoke test failed: diff JSON missing required keys"
+    rm -rf "$diff_tmp"
+    return 1
+  fi
+
+  print_info "Running publish dry-run smoke test..."
+  local publish_tmp publish_bare publish_cfg
+  publish_tmp="$(mktemp -d)"
+  publish_bare="$publish_tmp/bare.git"
+  git -C "$publish_tmp" init --bare bare.git -b main >/dev/null
+  publish_cfg="$publish_tmp/revelio.config.json"
+  jq --arg url "$publish_bare" \
+     '.publish.enabled = true | .publish.repoUrl = $url | .publish.branch = "main"' \
+     "$SCRIPT_DIR/revelio.config.json" > "$publish_cfg"
+  if ! "$CLI_ENTRYPOINT" publish --run "$diff_run_b" --config "$publish_cfg" --dry-run >/dev/null 2>&1; then
+    print_error "Smoke test failed: publish --dry-run failed"
+    rm -rf "$diff_tmp" "$publish_tmp"
+    return 1
+  fi
+  rm -rf "$diff_tmp" "$publish_tmp"
+
+  print_info "Running schedule status smoke test..."
+  if ! "$CLI_ENTRYPOINT" schedule status >/dev/null 2>&1; then
+    print_error "Smoke test failed: schedule status command failed"
     return 1
   fi
 

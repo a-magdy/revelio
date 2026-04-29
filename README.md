@@ -32,25 +32,28 @@ Trivy and Grype are strong filesystem and container scanners, but they do not en
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Host inventory across major package managers | Yes | Produces inventory artifacts under `~/.revelio/<run-id>/` by default |
+| Host inventory across major package managers | Yes | Produces inventory artifacts under `~/.revelio/<run-id>/` (or `$XDG_STATE_HOME/revelio/` on Linux) |
 | Outdated package checks | Yes | Per-manager outdated summaries are included in the run output |
 | Vulnerability aggregation + deduplication | Yes | OSV, npm audit, pip-audit, cargo-audit, Grype |
 | Parent / root package attribution | Yes | Helps explain which direct install owns a vulnerable transitive dep |
 | `why <package>` reverse dependency tracing | Yes | Supports multiple package managers |
 | Report rendering from existing artifacts | Yes | `report` summarizes the latest or a specific run |
-| Scheduled runs | Not yet | Planned |
+| Compare two reports over time | Yes | `revelio diff` (text/json/markdown), respects severity threshold |
+| Scheduled runs | Yes | `revelio schedule install` (launchd on macOS, systemd-user/cron on Linux) |
+| Publish reports to a git remote | Yes | `revelio publish` clones, copies, commits, pushes (token via env var) |
+| Linux portability | Partial | Path defaults + scheduling work on Linux; native distro inventory (apt/dpkg, dnf/rpm, pacman, snap, flatpak) is on the next milestone |
 | Bulk upgrade workflows | Not yet | Planned |
 | Roll back to an older safer version | Not yet | Planned |
-| Compare two reports over time | Not yet | Planned |
 
 ## Quick start
 
 ### Requirements
 
-- macOS
-- Bash 4 or newer (`brew install bash`; macOS's bundled Bash 3.2 is not supported)
+- macOS or Linux
+- Bash 4 or newer (`brew install bash` on macOS; macOS's bundled Bash 3.2 is not supported)
 - `jq`
 - `curl`
+- `git` (only when using `revelio publish`)
 
 Optional scanners and manager CLIs improve coverage when present, including `brew`, `npm`, `pip`, `pipx`, `uv`, `cargo`, `go`, `dotnet`, `pip-audit`, `cargo-audit`, and `grype`.
 
@@ -97,7 +100,11 @@ No build step required. The CLI runs directly from the repository.
 | `inventory` | Inventory only; skips vulnerability lookups |
 | `report [path]` | Render a terminal summary for the latest or specified run. Respects `--output-dir` and `--config` for locating runs |
 | `why <package>` | Show why a package is installed and who depends on it. Use `--manager <mgr>` to limit search; without it, all managers are searched |
+| `diff <a> <b>` | Compare two reports (run dirs or `report.json` paths). Buckets findings into new/resolved/unchanged and inventory into added/removed/version-drift. `--format text\|json\|markdown`, `--output <file>`, `--since <baseline>` |
+| `schedule <action>` | `install`, `uninstall`, or `status`. Backend chosen automatically: launchd on macOS, systemd-user (with cron fallback) on Linux. Options: `--cadence hourly\|daily\|weekly`, `--at HH:MM`, `--mode scan\|inventory`, `--publish` |
+| `publish [--latest\|--run <path>]` | Clone the configured git repo, copy the run artifacts under `reports/{hostname}/{run-id}/`, commit, and push. Supports `--dry-run`, `--force`, token via `REVELIO_GIT_TOKEN` (overridable in config) |
 | `init-config [path]` | Write a starter config file |
+| `version` (`--version`/`-V`) | Print the revelio version |
 
 ### Common options
 
@@ -187,13 +194,19 @@ The scan runs inside a subshell so failures abort cleanly, partial artifacts rem
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `defaults.outputDir` | `~/.revelio` | Root directory for run artifacts |
+| `defaults.outputDir` | `null` (platform default) | Root directory for run artifacts (`~/.revelio` on macOS, `$XDG_STATE_HOME/revelio` on Linux) |
 | `defaults.severityThreshold` | `high` | Minimum severity that triggers failure policy |
 | `defaults.failOnFindings` | `true` | Exit non-zero when findings meet the threshold |
 | `defaults.failOnScannerErrors` | `true` | Exit non-zero when enabled collectors or scanners fail |
 | `defaults.deepScan` | `false` | Adds deep Grype filesystem targets |
 | `defaults.allowNetworkQueries` | `true` | Enables OSV and related network lookups |
 | `scanners.npmReleaseChannelChecks` | `true` | Enables npm prerelease-channel remediation enrichment |
+| `publish.enabled` | `false` | Allow `revelio publish` to push to the configured remote |
+| `publish.repoUrl` | `""` | Git remote URL (HTTPS or SSH) |
+| `publish.branch` | `main` | Branch to push to |
+| `publish.pathTemplate` | `reports/{hostname}/{run-id}/` | Where inside the repo each run lands |
+| `publish.commitMessageTemplate` | `chore(revelio): scan {run-id} on {hostname}` | Commit message template |
+| `publish.tokenEnvVar` | `REVELIO_GIT_TOKEN` | Env var name to read the auth token from (never written to URL or config) |
 
 ## How it works
 
@@ -255,12 +268,11 @@ flowchart TD
 
 These are **planned ideas**, not current CLI features.
 
-### Scheduled runs on macOS
+### Linux native package managers
 
-- Install a LaunchAgent so Revelio can run at login and on a daily schedule
-- Make cadence configurable
-- Allow enabling or disabling scheduled scans from config and, later, a dedicated CLI command
-- Write reports to the normal output directory so scheduled and manual runs share the same artifact model
+- Add `dpkg`/`apt`, `rpm`/`dnf`, `pacman`, `snap`, `flatpak` inventory collectors and outdated checks.
+- Wire each into the OSV ecosystem mapping (Debian/Ubuntu/Alpine/RHEL/SUSE/Arch), with Grype as a fallback.
+- Ship Docker smoke harnesses per family so the per-distro paths can be exercised in CI.
 
 ### Bulk upgrade assistance
 
@@ -273,12 +285,6 @@ These are **planned ideas**, not current CLI features.
 - Explore safer-version guidance for ecosystems that support explicit version installs
 - Treat this as a constrained workflow, not a blanket "downgrade everything" action
 - Preserve auditability so users can see what changed and why
-
-### Compare reports over time
-
-- Add a command to compare two `report.json` files or run directories
-- Highlight new findings, resolved findings, package version drift, and policy changes
-- Use the existing per-run artifact layout as the comparison input
 
 ## Development
 

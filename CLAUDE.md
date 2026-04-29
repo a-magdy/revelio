@@ -18,6 +18,10 @@ Revelio is a standalone host dependency audit CLI for macOS. It inventories inst
 ├── lib/
 │   ├── core.sh             # Logging, require_param, check_dependencies, trim, to_lowercase
 │   ├── file.sh             # write_file_content, path_normalize, ensure_dir, is_absolute_path
+│   ├── platform.sh         # OS/arch detection, platform-specific default paths, scheduler chooser
+│   ├── diff.sh             # `revelio diff`: compare two reports (text/json/markdown)
+│   ├── schedule.sh         # `revelio schedule install/uninstall/status` (launchd | systemd-user | cron)
+│   ├── publish.sh          # `revelio publish`: push a run to the configured git repo
 │   └── security.sh         # All inventory, scanning, enrichment, and reporting logic (~3000 lines)
 └── .github/
     └── instructions/
@@ -61,6 +65,9 @@ Revelio is a standalone host dependency audit CLI for macOS. It inventories inst
 | `security_print_report_summary $report_file` | Render terminal summary for a report |
 | `security_report_exit_code $report_file` | Return non-zero when policy requires failure |
 | `security_why_package $pkg $manager` | Show why a package is installed (reverse deps) |
+| `diff_run $baseline $candidate $format $out` | (lib/diff.sh) Compare two reports; format = text/json/markdown |
+| `schedule_install / schedule_uninstall / schedule_status` | (lib/schedule.sh) Manage scheduled runs via launchd / systemd-user / cron |
+| `publish_run $cfg $run_dir $dry_run $force` | (lib/publish.sh) Push a run dir to the configured git repo |
 
 ## Configuration
 

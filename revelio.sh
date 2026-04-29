@@ -51,6 +51,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/security.sh"
 
+# shellcheck source=lib/diff.sh
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/diff.sh"
+
+# shellcheck source=lib/schedule.sh
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/schedule.sh"
+
+# shellcheck source=lib/publish.sh
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/publish.sh"
+
 readonly DEFAULT_CONFIG_FILE="${REVELIO_DEFAULT_CONFIG_FILE:-$SCRIPT_DIR/revelio.config.json}"
 
 _show_usage() {
@@ -62,7 +74,11 @@ Commands:
   inventory                 Collect inventory only (no vulnerability lookup)
   report [path]             Print summary for an existing report (defaults to latest)
   why <package>             Show why a package is installed (reverse dependencies)
+  diff <a> <b>              Compare two reports (run dirs or report.json paths)
+  schedule <action>         Manage scheduled runs: install | uninstall | status
+  publish [--latest|--run]  Push the latest (or specified) run to the configured git repo
   init-config [path]        Create a starter config file (default: ./revelio.config.json)
+  version                   Print revelio version and exit
   help                      Show this help
 
 Options for scan/inventory:
@@ -87,6 +103,25 @@ Options for report:
 Options for why:
   --manager <mgr>           Limit search to a specific manager (brew, gem, npm, pip, etc.)
 
+Options for diff:
+  --format <fmt>            Output format: text|json|markdown (default: text)
+  --output <path>           Write to file instead of stdout
+  --since <run>             Compare against the given baseline; candidate defaults to latest
+
+Options for schedule install:
+  --cadence <c>             hourly|daily|weekly (default: daily)
+  --at <HH:MM>              Time-of-day for daily/weekly (default: 03:00)
+  --mode <m>                scan|inventory (default: scan)
+  --publish                 Run "revelio publish --latest" after each scheduled scan
+
+Options for publish:
+  --latest                  Publish the most recent run (default if no --run is given)
+  --run <path>              Publish a specific run directory or report.json
+  --dry-run                 Stage changes but skip the final git push
+  --force                   Publish even if the run recorded scanner failures
+  --config <path>           Config file (provides publish.repoUrl, branch, etc.)
+  --output-dir <path>       Override output directory used to find the latest run
+
 Examples:
   $(basename "$0") scan --severity high
   $(basename "$0") scan --deep-scan --output-dir ~/.revelio
@@ -95,6 +130,12 @@ Examples:
   $(basename "$0") report ~/.revelio/20260406T010000Z/report.json
   $(basename "$0") why nokogiri
   $(basename "$0") why openssl@3 --manager brew
+  $(basename "$0") diff ~/.revelio/run-A ~/.revelio/run-B
+  $(basename "$0") diff --since ~/.revelio/run-A --format markdown --output diff.md
+  $(basename "$0") schedule install --cadence daily --at 03:00
+  $(basename "$0") schedule status
+  $(basename "$0") schedule uninstall
+  $(basename "$0") publish --latest --dry-run
   $(basename "$0") init-config
 EOF
 }
@@ -200,12 +241,14 @@ _resolve_output_dir() {
 
   if [[ -n "$config_path" && -f "$config_path" ]]; then
     local dir_raw
-    dir_raw="$(jq -r '.defaults.outputDir // "~/.revelio"' "$config_path" 2>/dev/null)"
-    _security_expand_path "$dir_raw"
-    return 0
+    dir_raw="$(jq -r '.defaults.outputDir // ""' "$config_path" 2>/dev/null)"
+    if [[ -n "$dir_raw" && "$dir_raw" != "null" ]]; then
+      _security_expand_path "$dir_raw"
+      return 0
+    fi
   fi
 
-  printf '%s\n' "$HOME/.revelio"
+  platform_default_output_dir
 }
 
 _resolve_latest_report() {
@@ -399,11 +442,237 @@ _run_why() {
   security_why_package "$WHY_PACKAGE" "$WHY_MANAGER"
 }
 
+_parse_diff_args() {
+  DIFF_BASELINE=""
+  DIFF_CANDIDATE=""
+  DIFF_FORMAT="text"
+  DIFF_OUTPUT=""
+  DIFF_SINCE=""
+  DIFF_CONFIG_PATH=""
+  DIFF_OUTPUT_DIR=""
+
+  local positionals=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format)
+        require_param "${2:-}" "format" "_parse_diff_args" || return 1
+        DIFF_FORMAT="$2"
+        shift 2
+        ;;
+      --output)
+        require_param "${2:-}" "output path" "_parse_diff_args" || return 1
+        DIFF_OUTPUT="$2"
+        shift 2
+        ;;
+      --since)
+        require_param "${2:-}" "baseline run" "_parse_diff_args" || return 1
+        DIFF_SINCE="$2"
+        shift 2
+        ;;
+      --config)
+        require_param "${2:-}" "config path" "_parse_diff_args" || return 1
+        DIFF_CONFIG_PATH="$2"
+        shift 2
+        ;;
+      --output-dir)
+        require_param "${2:-}" "output dir" "_parse_diff_args" || return 1
+        DIFF_OUTPUT_DIR="$2"
+        shift 2
+        ;;
+      --help|-h)
+        _show_usage
+        return 2
+        ;;
+      -*)
+        print_error "Unknown diff option: $1"
+        _show_usage
+        return 1
+        ;;
+      *)
+        positionals+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -n "$DIFF_SINCE" ]]; then
+    DIFF_BASELINE="$DIFF_SINCE"
+    if [[ ${#positionals[@]} -ge 1 ]]; then
+      DIFF_CANDIDATE="${positionals[0]}"
+    fi
+  else
+    if [[ ${#positionals[@]} -lt 2 ]]; then
+      print_error "Usage: $(basename "$0") diff <baseline> <candidate>  (or --since <baseline>)"
+      return 1
+    fi
+    DIFF_BASELINE="${positionals[0]}"
+    DIFF_CANDIDATE="${positionals[1]}"
+  fi
+}
+
+_run_diff() {
+  local parse_status=0
+  if _parse_diff_args "$@"; then
+    :
+  else
+    parse_status=$?
+    [[ "$parse_status" -eq 2 ]] && return 0
+    return "$parse_status"
+  fi
+
+  check_dependencies jq
+
+  # If no candidate is provided (e.g. with --since), default to the latest report.
+  if [[ -z "$DIFF_CANDIDATE" ]]; then
+    local config_for_resolve="${DIFF_CONFIG_PATH:-}"
+    if [[ -z "$config_for_resolve" && -f "$DEFAULT_CONFIG_FILE" ]]; then
+      config_for_resolve="$DEFAULT_CONFIG_FILE"
+    fi
+    local output_dir
+    output_dir="$(_resolve_output_dir "$config_for_resolve" "$DIFF_OUTPUT_DIR")"
+    DIFF_CANDIDATE="$(_resolve_latest_report "$output_dir")" || return 1
+    print_info "Diffing against latest: $DIFF_CANDIDATE"
+  fi
+
+  diff_run "$DIFF_BASELINE" "$DIFF_CANDIDATE" "$DIFF_FORMAT" "$DIFF_OUTPUT"
+}
+
+_parse_publish_args() {
+  PUBLISH_RUN=""
+  PUBLISH_DRY_RUN="false"
+  PUBLISH_FORCE="false"
+  PUBLISH_CONFIG_PATH=""
+  PUBLISH_OUTPUT_DIR=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --latest)
+        # No-op: latest is the default when no --run is given.
+        shift ;;
+      --run)
+        require_param "${2:-}" "run path" "_parse_publish_args" || return 1
+        PUBLISH_RUN="$2"; shift 2 ;;
+      --dry-run)
+        PUBLISH_DRY_RUN="true"; shift ;;
+      --force)
+        PUBLISH_FORCE="true"; shift ;;
+      --config)
+        require_param "${2:-}" "config path" "_parse_publish_args" || return 1
+        PUBLISH_CONFIG_PATH="$2"; shift 2 ;;
+      --output-dir)
+        require_param "${2:-}" "output dir" "_parse_publish_args" || return 1
+        PUBLISH_OUTPUT_DIR="$2"; shift 2 ;;
+      --help|-h)
+        _show_usage; return 2 ;;
+      *)
+        print_error "Unknown publish option: $1"; return 1 ;;
+    esac
+  done
+}
+
+_run_publish() {
+  local parse_status=0
+  if _parse_publish_args "$@"; then
+    :
+  else
+    parse_status=$?
+    [[ "$parse_status" -eq 2 ]] && return 0
+    return "$parse_status"
+  fi
+
+  check_dependencies jq git || return 1
+
+  local config_path="${PUBLISH_CONFIG_PATH:-}"
+  if [[ -z "$config_path" && -f "$DEFAULT_CONFIG_FILE" ]]; then
+    config_path="$DEFAULT_CONFIG_FILE"
+  fi
+
+  local effective_config
+  effective_config="$(security_build_effective_config \
+    "$config_path" "$PUBLISH_OUTPUT_DIR" "" "" "" "" "")" || return 1
+
+  # Resolve the run directory to publish.
+  local run_dir
+  if [[ -n "$PUBLISH_RUN" ]]; then
+    if [[ -f "$PUBLISH_RUN" ]]; then
+      run_dir="$(dirname "$PUBLISH_RUN")"
+    elif [[ -d "$PUBLISH_RUN" ]]; then
+      run_dir="$PUBLISH_RUN"
+    else
+      print_error "Run path not found: $PUBLISH_RUN"
+      return 1
+    fi
+  else
+    local output_dir latest_report
+    output_dir="$(_resolve_output_dir "$config_path" "$PUBLISH_OUTPUT_DIR")"
+    latest_report="$(_resolve_latest_report "$output_dir")" || return 1
+    run_dir="$(dirname "$latest_report")"
+  fi
+
+  publish_run "$effective_config" "$run_dir" "$PUBLISH_DRY_RUN" "$PUBLISH_FORCE"
+}
+
+_run_schedule() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then shift; fi
+
+  case "$action" in
+    install)
+      local cadence="daily" at="03:00" mode="scan" publish_after="false"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --cadence)
+            require_param "${2:-}" "cadence" "_run_schedule" || return 1
+            cadence="$2"; shift 2 ;;
+          --at)
+            require_param "${2:-}" "time-of-day" "_run_schedule" || return 1
+            at="$2"; shift 2 ;;
+          --mode)
+            require_param "${2:-}" "mode" "_run_schedule" || return 1
+            mode="$2"; shift 2 ;;
+          --publish)
+            publish_after="true"; shift ;;
+          --help|-h)
+            _show_usage; return 0 ;;
+          *)
+            print_error "Unknown schedule install option: $1"; return 1 ;;
+        esac
+      done
+      schedule_install "$cadence" "$at" "$mode" "$SCRIPT_DIR/$(basename "$0")" "$publish_after"
+      ;;
+    uninstall)
+      schedule_uninstall
+      ;;
+    status|"")
+      schedule_status
+      ;;
+    --help|-h|help)
+      _show_usage
+      ;;
+    *)
+      print_error "Unknown schedule action: $action (expected install|uninstall|status)"
+      return 1
+      ;;
+  esac
+}
+
 main() {
   local command="${1:-scan}"
   if [[ $# -gt 0 ]]; then
     shift
   fi
+
+  # Handle top-level flags that don't take a subcommand.
+  case "$command" in
+    --version|-V)
+      printf 'revelio %s\n' "$REVELIO_VERSION"
+      return 0
+      ;;
+    --help|-h)
+      _show_usage
+      return 0
+      ;;
+  esac
 
   # Allow "scan" options without explicitly writing "scan".
   if [[ "$command" == -* ]]; then
@@ -424,8 +693,20 @@ main() {
     why)
       _run_why "$@"
       ;;
+    diff)
+      _run_diff "$@"
+      ;;
+    schedule)
+      _run_schedule "$@"
+      ;;
+    publish)
+      _run_publish "$@"
+      ;;
     init-config)
       _run_init_config "$@"
+      ;;
+    version|--version|-V)
+      printf 'revelio %s\n' "$REVELIO_VERSION"
       ;;
     help|--help|-h)
       _show_usage

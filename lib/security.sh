@@ -13,6 +13,11 @@ if ! declare -f write_file_content &>/dev/null; then
   # shellcheck disable=SC1091
   source "$(dirname "${BASH_SOURCE[0]}")/file.sh"
 fi
+if ! declare -f platform_os &>/dev/null; then
+  # shellcheck source=./platform.sh
+  # shellcheck disable=SC1091
+  source "$(dirname "${BASH_SOURCE[0]}")/platform.sh"
+fi
 
 #===================================================================================================
 # Public API
@@ -20,6 +25,15 @@ fi
 
 REVELIO_LAST_REPORT=""
 REVELIO_LAST_RUN_DIR=""
+
+# Single source of truth for the tool version. Surfaced via `revelio --version`,
+# stamped into every `report.json` as `toolVersion`, and used by `revelio diff`
+# to decide whether two reports were produced by compatible tool versions.
+REVELIO_VERSION="0.2.0-dev"
+
+# Schema version for `report.json`. Bump when the report shape changes in a way
+# that consumers (diff, publish, downstream tooling) need to detect.
+REVELIO_REPORT_SCHEMA_VERSION="1"
 
 # Emit the default configuration JSON for the revelio workflow.
 security_default_config_json() {
@@ -35,7 +49,7 @@ security_default_config_json() {
   cat <<'JSON'
 {
   "defaults": {
-    "outputDir": "~/.revelio",
+    "outputDir": null,
     "severityThreshold": "high",
     "failOnFindings": true,
     "failOnScannerErrors": true,
@@ -54,7 +68,12 @@ security_default_config_json() {
     "rubyGems": true,
     "rubyGemsExcludeSystem": true,
     "goTools": true,
-    "dotnetTools": true
+    "dotnetTools": true,
+    "dpkg": true,
+    "rpm": true,
+    "pacman": true,
+    "snap": true,
+    "flatpak": true
   },
   "scanners": {
     "outdatedChecks": true,
@@ -67,15 +86,30 @@ security_default_config_json() {
     "grypeTargets": [
       "/opt/homebrew/Cellar",
       "/usr/local/Cellar",
+      "/home/linuxbrew/.linuxbrew/Cellar",
+      "~/.linuxbrew/Cellar",
       "~/.npm-global/lib/node_modules",
       "~/.local/pipx/venvs",
+      "~/.local/share/pipx/venvs",
       "~/.cargo/bin",
       "~/go/bin"
     ],
     "grypeDeepTargets": [
       "/Applications",
-      "~/Applications"
+      "~/Applications",
+      "/usr/local/bin",
+      "/var/lib/flatpak/app",
+      "~/.local/share/flatpak/app",
+      "/snap"
     ]
+  },
+  "publish": {
+    "enabled": false,
+    "repoUrl": "",
+    "branch": "main",
+    "pathTemplate": "reports/{hostname}/{run-id}/",
+    "commitMessageTemplate": "chore(revelio): scan {run-id} on {hostname}",
+    "tokenEnvVar": "REVELIO_GIT_TOKEN"
   }
 }
 JSON
@@ -219,7 +253,10 @@ security_run() {
   fi
 
   local output_dir_raw output_dir run_id run_dir generated_at old_umask
-  output_dir_raw="$(jq -r '.defaults.outputDir // "~/.revelio"' <<<"$config_json")"
+  output_dir_raw="$(jq -r '.defaults.outputDir // ""' <<<"$config_json")"
+  if [[ -z "$output_dir_raw" || "$output_dir_raw" == "null" ]]; then
+    output_dir_raw="$(platform_default_output_dir)"
+  fi
   output_dir="$(_security_expand_path "$output_dir_raw")"
   if ! is_absolute_path "$output_dir"; then
     output_dir="$(ensure_absolute_path "$output_dir")"
@@ -3066,14 +3103,26 @@ _security_build_report() {
     --arg inventory_dir "$inventory_dir" \
     --arg outdated_dir "$outdated_dir" \
     --arg scans_dir "$scans_dir" \
+    --arg tool_version "$REVELIO_VERSION" \
+    --arg schema_version "$REVELIO_REPORT_SCHEMA_VERSION" \
+    --arg host_os "$(platform_os)" \
+    --arg host_arch "$(platform_arch)" \
+    --arg host_name "$(hostname 2>/dev/null || echo unknown)" \
     --argjson config "$config_json" \
     --slurpfile inventory_summary "$inventory_dir/summary.json" \
     --slurpfile outdated_summary "$outdated_dir/summary.json" \
     --slurpfile scan_summary "$scans_dir/summary.json" '
     {
+      schemaVersion: $schema_version,
+      toolVersion: $tool_version,
       generatedAt: $generated_at,
       mode: $mode,
       runDir: $run_dir,
+      host: {
+        name: $host_name,
+        os: $host_os,
+        arch: $host_arch
+      },
       config: $config,
       inventory: ($inventory_summary[0] // {}),
       outdated: ($outdated_summary[0] // {}),
