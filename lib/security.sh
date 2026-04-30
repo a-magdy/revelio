@@ -450,9 +450,13 @@ security_print_report_summary() {
   packages_file="$(jq -r '.artifacts.inventoryPackages // ""' "$report_file")"
   outdated_file="$(jq -r '.artifacts.outdatedItems // ""' "$report_file")"
 
+  local sep
+  sep="──────────────────────────────────────────────────"
   printf '\n'
-  print_info "Revelio mode: $mode"
-  print_info "Run directory: $run_dir"
+  printf '%s◉%s  %srevelio%s  %s·  %s%s\n' \
+    "$_C_GREEN" "$_C_RESET" "$_C_BOLD" "$_C_RESET" "$_C_PURPLE" "$mode" "$_C_RESET"
+  printf '%s%s%s\n' "$_C_PURPLE" "$sep" "$_C_RESET"
+  printf '%s  run  %s%s\n' "$_C_DIM" "$run_dir" "$_C_RESET"
   printf '\n'
 
   #--- Summary counts
