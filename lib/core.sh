@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Core helpers for standalone revelio CLI
 
-print_success() { printf "\xE2\x9C\x85 %s\n" "$1"; }
+print_success() {
+  [[ "${REVELIO_QUIET:-0}" == "1" ]] && return 0
+  printf "\xE2\x9C\x85 %s\n" "$1"
+}
 print_warning() { printf "\xE2\x9A\xA0\xEF\xB8\x8F %s\n" "$1"; }
 print_error() { printf "\xE2\x9D\x8C %s\n" "$1" >&2; }
-print_info() { printf "\xE2\x84\xB9\xEF\xB8\x8F %s\n" "$1"; }
+print_info() {
+  [[ "${REVELIO_QUIET:-0}" == "1" ]] && return 0
+  printf "\xE2\x84\xB9\xEF\xB8\x8F %s\n" "$1"
+}
 
 require_param() {
   local value="${1:-}"

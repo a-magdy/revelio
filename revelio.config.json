@@ -1,13 +1,14 @@
 {
   "defaults": {
-    "outputDir": "~/.revelio",
+    "outputDir": null,
     "severityThreshold": "high",
     "failOnFindings": true,
     "failOnScannerErrors": true,
     "deepScan": false,
     "allowNetworkQueries": true,
     "osvBatchSize": 200,
-    "osvDetailDelay": 0.1
+    "osvDetailDelay": 0.1,
+    "retainRuns": 0
   },
   "inventory": {
     "homebrew": true,
@@ -19,7 +20,12 @@
     "rubyGems": true,
     "rubyGemsExcludeSystem": true,
     "goTools": true,
-    "dotnetTools": true
+    "dotnetTools": true,
+    "dpkg": true,
+    "rpm": true,
+    "pacman": true,
+    "snap": true,
+    "flatpak": true
   },
   "scanners": {
     "outdatedChecks": true,
@@ -32,14 +38,29 @@
     "grypeTargets": [
       "/opt/homebrew/Cellar",
       "/usr/local/Cellar",
+      "/home/linuxbrew/.linuxbrew/Cellar",
+      "~/.linuxbrew/Cellar",
       "~/.npm-global/lib/node_modules",
       "~/.local/pipx/venvs",
+      "~/.local/share/pipx/venvs",
       "~/.cargo/bin",
       "~/go/bin"
     ],
     "grypeDeepTargets": [
       "/Applications",
-      "~/Applications"
+      "~/Applications",
+      "/usr/local/bin",
+      "/var/lib/flatpak/app",
+      "~/.local/share/flatpak/app",
+      "/snap"
     ]
+  },
+  "publish": {
+    "enabled": false,
+    "repoUrl": "",
+    "branch": "main",
+    "pathTemplate": "reports/{hostname}/{run-id}/",
+    "commitMessageTemplate": "chore(revelio): scan {run-id} on {hostname}",
+    "tokenEnvVar": "REVELIO_GIT_TOKEN"
   }
 }
