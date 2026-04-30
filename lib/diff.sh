@@ -103,28 +103,34 @@ _diff_resolve_report() {
   return 1
 }
 
-# Read the advisories file referenced by a report, or emit an empty array
-# when the report has no scan artifacts (e.g. inventory-only mode).
+# Resolve the advisories file referenced by a report to a real path. Returns
+# a path that always points to a valid JSON array (using $empty_path for the
+# inventory-only case). Output: the resolved file path on stdout.
+# $1 => report file; $2 => fallback empty-array file
 _diff_load_advisories() {
   local report_file="$1"
+  local empty_path="$2"
   local advisories_path
   advisories_path="$(jq -r '.artifacts.scanAdvisories // ""' "$report_file" 2>/dev/null)"
   if [[ -n "$advisories_path" && -f "$advisories_path" ]]; then
-    cat "$advisories_path"
+    printf '%s\n' "$advisories_path"
   else
-    printf '[]\n'
+    printf '%s\n' "$empty_path"
   fi
 }
 
-# Read the inventory packages file referenced by a report.
+# Resolve the inventory packages file referenced by a report to a real path.
+# Same fallback semantics as _diff_load_advisories.
+# $1 => report file; $2 => fallback empty-array file
 _diff_load_packages() {
   local report_file="$1"
+  local empty_path="$2"
   local packages_path
   packages_path="$(jq -r '.artifacts.inventoryPackages // ""' "$report_file" 2>/dev/null)"
   if [[ -n "$packages_path" && -f "$packages_path" ]]; then
-    cat "$packages_path"
+    printf '%s\n' "$packages_path"
   else
-    printf '[]\n'
+    printf '%s\n' "$empty_path"
   fi
 }
 
@@ -134,11 +140,22 @@ _diff_compute() {
   local baseline_file="$1"
   local candidate_file="$2"
 
+  # Resolve artifact files to disk paths and pass them via --slurpfile rather
+  # than slurping their contents into shell variables and shipping via
+  # --argjson. Inventories on real Linux hosts (npm + apt + pipx + ...) easily
+  # blow past ARG_MAX when packed into a single jq argv.
+  local tmp_dir empty_path
+  tmp_dir="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp_dir'" RETURN
+  empty_path="$tmp_dir/empty.json"
+  printf '[]\n' > "$empty_path"
+
   local baseline_advisories candidate_advisories baseline_packages candidate_packages
-  baseline_advisories="$(_diff_load_advisories "$baseline_file")"
-  candidate_advisories="$(_diff_load_advisories "$candidate_file")"
-  baseline_packages="$(_diff_load_packages "$baseline_file")"
-  candidate_packages="$(_diff_load_packages "$candidate_file")"
+  baseline_advisories="$(_diff_load_advisories "$baseline_file" "$empty_path")"
+  candidate_advisories="$(_diff_load_advisories "$candidate_file" "$empty_path")"
+  baseline_packages="$(_diff_load_packages "$baseline_file" "$empty_path")"
+  candidate_packages="$(_diff_load_packages "$candidate_file" "$empty_path")"
 
   # The advisory fusion key is (manager, ecosystem, package, id, dependencyPath).
   # We build that key here to match what `_security_fuse_findings` produces and
@@ -147,10 +164,10 @@ _diff_compute() {
   jq -n \
     --slurpfile base_report_arr "$baseline_file" \
     --slurpfile cand_report_arr "$candidate_file" \
-    --argjson base_adv "$baseline_advisories" \
-    --argjson cand_adv "$candidate_advisories" \
-    --argjson base_pkgs "$baseline_packages" \
-    --argjson cand_pkgs "$candidate_packages" '
+    --slurpfile base_adv_arr "$baseline_advisories" \
+    --slurpfile cand_adv_arr "$candidate_advisories" \
+    --slurpfile base_pkgs_arr "$baseline_packages" \
+    --slurpfile cand_pkgs_arr "$candidate_packages" '
     # Severity ranks used everywhere else in revelio.
     def rank($s):
       if $s == "critical" then 4
@@ -168,8 +185,13 @@ _diff_compute() {
     def pkg_key:
       [(.manager // ""), (.name // .package // "")] | @tsv;
 
+    # --slurpfile wraps the file content in a one-element array; unwrap.
     ($base_report_arr[0]) as $base_report
     | ($cand_report_arr[0]) as $cand_report
+    | ($base_adv_arr[0]) as $base_adv
+    | ($cand_adv_arr[0]) as $cand_adv
+    | ($base_pkgs_arr[0]) as $base_pkgs
+    | ($cand_pkgs_arr[0]) as $cand_pkgs
     # Build advisory maps the long way (reduce) to preserve duplicate keys as
     # arrays rather than silently collapsing them as `from_entries` would.
     | (reduce ($base_adv[]) as $a ({}; .[($a | adv_key)] += [$a])) as $base_map
