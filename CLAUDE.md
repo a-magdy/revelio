@@ -22,6 +22,7 @@ Revelio is a standalone host dependency audit CLI for macOS and Linux. It invent
 ├── docs/
 │   ├── brand.html          # Brand exploration reference (standalone HTML, self-contained)
 │   ├── BRAND.md            # Brand tokens, color palette, CLI ANSI mapping, asset index
+│   ├── LAUNCH.md           # Going-public checklist (Pages, social preview, license, community, release)
 │   └── index.html          # GitHub Pages landing page (deployed via .github/workflows/pages.yml)
 ├── lib/
 │   ├── core.sh             # Logging, ANSI color vars, require_param, check_dependencies, trim, to_lowercase
