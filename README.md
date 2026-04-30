@@ -41,7 +41,7 @@ Trivy and Grype are strong filesystem and container scanners, but they do not en
 | Compare two reports over time | Yes | `revelio diff` (text/json/markdown), respects severity threshold |
 | Scheduled runs | Yes | `revelio schedule install` (launchd on macOS, systemd-user/cron on Linux) |
 | Publish reports to a git remote | Yes | `revelio publish` clones, copies, commits, pushes (token via env var) |
-| Linux portability | Partial | Path defaults + scheduling work on Linux; native distro inventory (apt/dpkg, dnf/rpm, pacman, snap, flatpak) is on the next milestone |
+| Linux portability | Yes | Native inventory and outdated checks for `dpkg`/`apt`, `rpm`/`dnf`, `pacman`, `snap`, `flatpak`. Distro-aware OSV ecosystem mapping (Debian/Ubuntu) with Grype as the safety net for vendor-labeled distros. Smoke harness in `docker/` validates against ubuntu/fedora/arch |
 | Bulk upgrade workflows | Not yet | Planned |
 | Roll back to an older safer version | Not yet | Planned |
 
@@ -55,9 +55,17 @@ Trivy and Grype are strong filesystem and container scanners, but they do not en
 - `curl`
 - `git` (only when using `revelio publish`)
 
-Optional scanners and manager CLIs improve coverage when present, including `brew`, `npm`, `pip`, `pipx`, `uv`, `cargo`, `go`, `dotnet`, `pip-audit`, `cargo-audit`, and `grype`.
+Optional scanners and manager CLIs improve coverage when present:
 
-Revelio fails fast on unsupported Bash versions and prints a Homebrew install hint instead of breaking later on Bash 4-only features.
+- **macOS**: `brew`, `npm`, `pip`, `pipx`, `uv`, `cargo`, `go`, `dotnet`
+- **Linux**: `dpkg-query`/`apt-cache`, `rpm`/`dnf`, `pacman`/`pactree` (from `pacman-contrib`), `snap`, `flatpak`
+- **All platforms**: `pip-audit`, `cargo-audit`, `grype`
+
+Revelio fails fast on unsupported Bash versions. macOS ships Bash 3.2; install Bash 4+ with `brew install bash`. Most modern Linux distros (Ubuntu 20.04+, Fedora 32+, Arch, Debian 11+) ship Bash 5 by default.
+
+### Network behavior
+
+Network lookups (OSV, npm, pip, cargo registries) honor the standard `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` environment variables — `curl` reads them automatically. Use `revelio scan --offline` to skip all network work and rely solely on local indexes + Grype.
 
 ### Installation
 
@@ -269,12 +277,6 @@ flowchart TD
 
 These are **planned ideas**, not current CLI features.
 
-### Linux native package managers
-
-- Add `dpkg`/`apt`, `rpm`/`dnf`, `pacman`, `snap`, `flatpak` inventory collectors and outdated checks.
-- Wire each into the OSV ecosystem mapping (Debian/Ubuntu/Alpine/RHEL/SUSE/Arch), with Grype as a fallback.
-- Ship Docker smoke harnesses per family so the per-distro paths can be exercised in CI.
-
 ### Bulk upgrade assistance
 
 - Generate manager-aware upgrade suggestions for multiple actionable advisories in one pass
@@ -295,7 +297,18 @@ These are **planned ideas**, not current CLI features.
 ./ci-smoke.sh
 ```
 
-That script runs `shellcheck`, exercises `help`, `inventory --offline`, `report`, a best-effort `why jq --manager brew` check, and `init-config`, then validates that `report.json` exists with the expected shape.
+That script runs `shellcheck`, exercises `help`, `inventory --offline`, `report` (text/json/sarif/csv), `diff`, `publish --dry-run`, `schedule status`, `--quiet`/`--json`, `init-config --force`, and `retainRuns` pruning, plus a best-effort loop that exercises the Linux native collectors when their binaries are present (silently skipped on macOS).
+
+### Linux validation via Docker
+
+The repository ships a small harness that runs the full smoke suite inside ubuntu, fedora, and arch containers — useful when developing on macOS or to validate Linux behavior in CI.
+
+```bash
+./docker/run-linux-smoke.sh           # all three distros
+./docker/run-linux-smoke.sh ubuntu    # one distro
+```
+
+See `docker/README.md` for details and how to add a new distro.
 
 ## Contributing
 

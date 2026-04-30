@@ -44,12 +44,19 @@
       "~/.local/pipx/venvs",
       "~/.local/share/pipx/venvs",
       "~/.cargo/bin",
-      "~/go/bin"
+      "~/go/bin",
+      "/var/lib/dpkg",
+      "/var/lib/rpm",
+      "/var/lib/pacman/local",
+      "/var/lib/snapd",
+      "/var/lib/flatpak"
     ],
     "grypeDeepTargets": [
       "/Applications",
       "~/Applications",
-      "/usr/local/bin",
+      "/usr/local",
+      "/opt",
+      "~/.local",
       "/var/lib/flatpak/app",
       "~/.local/share/flatpak/app",
       "/snap"

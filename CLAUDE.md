@@ -4,7 +4,7 @@
 
 ## Overview
 
-Revelio is a standalone host dependency audit CLI for macOS. It inventories installed packages across every major package manager, checks for outdated versions, and cross-references findings against multiple vulnerability databases — all in a Bash 4+ script with runtime dependencies on `jq` and `curl`.
+Revelio is a standalone host dependency audit CLI for macOS and Linux. It inventories installed packages across every major package manager (Homebrew, npm, pip/pipx/uv, cargo, gem, go, dotnet on macOS; the same plus dpkg/apt, rpm/dnf, pacman, snap, flatpak on Linux), checks for outdated versions, and cross-references findings against multiple vulnerability databases — all in a Bash 4+ script with runtime dependencies on `jq` and `curl`.
 
 ## Repository Map
 

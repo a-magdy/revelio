@@ -1,0 +1,19 @@
+# Ubuntu smoke harness for the Revelio CLI.
+# Exercises the dpkg/apt collector path on a debian-family base.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    shellcheck \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+CMD ["bash", "./ci-smoke.sh"]

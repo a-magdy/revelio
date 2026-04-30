@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Heavy docker harness runs weekly on Mondays at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: ci-smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install bash jq shellcheck
+          # Put the Homebrew bash 5+ ahead of macOS's bundled /bin/bash 3.2
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq shellcheck
+
+      - name: Tool versions
+        run: |
+          bash --version
+          jq --version
+          shellcheck --version
+          git --version
+
+      - name: Run smoke suite
+        run: ./ci-smoke.sh
+
+      # On Ubuntu, the new Linux native collectors are exercised by the
+      # smoke loop because dpkg-query is present. On macOS they are
+      # silently skipped. No extra step needed.
+
+  docker-smoke:
+    name: docker-smoke (ubuntu + fedora + arch)
+    # Skip on push/PR (slow); run on schedule and manual dispatch only.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Linux docker smoke harness (all distros)
+        run: ./docker/run-linux-smoke.sh

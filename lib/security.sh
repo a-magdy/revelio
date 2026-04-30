@@ -93,12 +93,19 @@ security_default_config_json() {
       "~/.local/pipx/venvs",
       "~/.local/share/pipx/venvs",
       "~/.cargo/bin",
-      "~/go/bin"
+      "~/go/bin",
+      "/var/lib/dpkg",
+      "/var/lib/rpm",
+      "/var/lib/pacman/local",
+      "/var/lib/snapd",
+      "/var/lib/flatpak"
     ],
     "grypeDeepTargets": [
       "/Applications",
       "~/Applications",
-      "/usr/local/bin",
+      "/usr/local",
+      "/opt",
+      "~/.local",
       "/var/lib/flatpak/app",
       "~/.local/share/flatpak/app",
       "/snap"
@@ -1016,7 +1023,7 @@ security_why_package() {
   if [[ -n "$manager" ]]; then
     managers=("$manager")
   else
-    managers=(homebrew gem npm pip pipx uv cargo go dotnet)
+    managers=(homebrew gem npm pip pipx uv cargo go dotnet dpkg rpm pacman snap flatpak)
   fi
 
   local found=false
@@ -1045,6 +1052,21 @@ security_why_package() {
         ;;
       pipx|uv|cargo|go|dotnet)
         _security_why_simple "$pkg_name" "$mgr" && found=true
+        ;;
+      dpkg|apt)
+        _security_why_dpkg "$pkg_name" && found=true
+        ;;
+      rpm|dnf|yum)
+        _security_why_rpm "$pkg_name" && found=true
+        ;;
+      pacman)
+        _security_why_pacman "$pkg_name" && found=true
+        ;;
+      snap)
+        _security_why_snap "$pkg_name" && found=true
+        ;;
+      flatpak)
+        _security_why_flatpak "$pkg_name" && found=true
         ;;
     esac
   done
@@ -1252,6 +1274,157 @@ _security_why_simple() {
   esac
 }
 
+#---------------------------------------------------------------------------------------------------
+# Linux why-package helpers
+#---------------------------------------------------------------------------------------------------
+
+_security_why_dpkg() {
+  local pkg_name="$1"
+
+  command_exists dpkg-query || return 1
+  # Confirm the package is installed (dpkg-query returns 1 otherwise).
+  local status
+  status="$(dpkg-query -W -f '${db:Status-Status}' "$pkg_name" 2>/dev/null || true)"
+  if [[ "$status" != "installed" ]]; then
+    return 1
+  fi
+
+  local version
+  version="$(dpkg-query -W -f '${Version}' "$pkg_name" 2>/dev/null || echo "unknown")"
+
+  printf '\n'
+  print_info "dpkg: $pkg_name ($version)"
+
+  if ! command_exists apt-cache; then
+    printf '  Install type: unknown (apt-cache not available for reverse-dep lookup)\n'
+    return 0
+  fi
+
+  # `apt-cache rdepends --installed` prints a header line + an indented list.
+  # Empty list means nothing currently installed depends on this package.
+  local rdeps
+  rdeps="$(apt-cache rdepends --installed "$pkg_name" 2>/dev/null \
+    | awk 'NR>2 && NF>0 {sub(/^[[:space:]]+/, ""); print}' \
+    | sort -u)"
+
+  if [[ -z "$rdeps" ]]; then
+    printf '  Install type: direct (no installed reverse-dependencies)\n'
+  else
+    printf '  Install type: dependency\n'
+    printf '  Required by:\n'
+    local dep
+    while IFS= read -r dep; do
+      [[ -n "$dep" ]] && printf '    - %s\n' "$dep"
+    done <<<"$rdeps"
+  fi
+}
+
+_security_why_rpm() {
+  local pkg_name="$1"
+
+  command_exists rpm || return 1
+  if ! rpm -q "$pkg_name" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local version
+  version="$(rpm -q --qf '%{VERSION}-%{RELEASE}' "$pkg_name" 2>/dev/null || echo "unknown")"
+
+  printf '\n'
+  print_info "rpm: $pkg_name ($version)"
+
+  local rdeps=""
+  if command_exists dnf; then
+    rdeps="$(dnf repoquery --installed --whatrequires "$pkg_name" 2>/dev/null | awk 'NF>0')"
+  fi
+
+  if [[ -z "$rdeps" ]]; then
+    # rpm -q --whatrequires reports capabilities, not packages, but it's the
+    # only fallback when dnf isn't present.
+    rdeps="$(rpm -q --whatrequires "$pkg_name" 2>/dev/null \
+      | grep -v "^no package requires" || true)"
+  fi
+
+  if [[ -z "$rdeps" ]]; then
+    printf '  Install type: direct (no installed reverse-dependencies)\n'
+  else
+    printf '  Install type: dependency\n'
+    printf '  Required by:\n'
+    local dep
+    while IFS= read -r dep; do
+      [[ -n "$dep" ]] && printf '    - %s\n' "$dep"
+    done <<<"$rdeps"
+  fi
+}
+
+_security_why_pacman() {
+  local pkg_name="$1"
+
+  command_exists pacman || return 1
+  if ! pacman -Q "$pkg_name" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local version
+  version="$(pacman -Q "$pkg_name" 2>/dev/null | awk '{print $2}')"
+
+  printf '\n'
+  print_info "pacman: $pkg_name ($version)"
+
+  if ! command_exists pactree; then
+    printf '  Install type: unknown (pactree not installed; install pacman-contrib for reverse-dep tree)\n'
+    return 0
+  fi
+
+  local rtree
+  rtree="$(pactree -r "$pkg_name" 2>/dev/null | tail -n +2)"
+
+  if [[ -z "$rtree" ]]; then
+    printf '  Install type: direct (no installed reverse-dependencies)\n'
+  else
+    printf '  Install type: dependency\n'
+    printf '  Required by (reverse tree):\n'
+    local line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && printf '    %s\n' "$line"
+    done <<<"$rtree"
+  fi
+}
+
+_security_why_snap() {
+  local pkg_name="$1"
+
+  command_exists snap || return 1
+  if ! snap list "$pkg_name" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local version
+  version="$(snap list "$pkg_name" 2>/dev/null | awk 'NR==2 {print $2}')"
+
+  printf '\n'
+  print_info "snap: $pkg_name (${version:-unknown})"
+  printf '  Install type: direct (snap-managed)\n'
+  printf '  Note: snap packages are sandboxed and do not have reverse-dependency relationships.\n'
+}
+
+_security_why_flatpak() {
+  local pkg_name="$1"
+
+  command_exists flatpak || return 1
+  if ! flatpak info "$pkg_name" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local version
+  version="$(flatpak info "$pkg_name" 2>/dev/null | awk -F': *' '/^[[:space:]]*Version:/ {print $2; exit}')"
+
+  printf '\n'
+  print_info "flatpak: $pkg_name (${version:-unknown})"
+  printf '  Install type: direct (flatpak-managed)\n'
+  printf '  Note: flatpak apps are sandboxed and do not have reverse-dependency relationships.\n'
+}
+
 _security_collect_inventory() {
   local config_json="$1"
   local inventory_dir="$2"
@@ -1265,7 +1438,7 @@ _security_collect_inventory() {
   # concurrent appends corrupting the shared NDJSON files. Each background
   # subshell is not subject to set -e, so individual failures remain non-fatal
   # (collectors already handle their own errors and return 0).
-  local -a collectors=(homebrew npm python pipx uv cargo rubygems go dotnet)
+  local -a collectors=(homebrew npm python pipx uv cargo rubygems go dotnet dpkg rpm pacman snap flatpak)
   local c
   for c in "${collectors[@]}"; do
     : >"$inventory_dir/packages-${c}.ndjson"
@@ -1290,6 +1463,16 @@ _security_collect_inventory() {
     "$inventory_dir/packages-go.ndjson" "$inventory_dir/collectors-go.ndjson" &
   _security_collect_dotnet_inventory "$config_json" "$inventory_dir" \
     "$inventory_dir/packages-dotnet.ndjson" "$inventory_dir/collectors-dotnet.ndjson" &
+  _security_collect_dpkg_inventory "$config_json" "$inventory_dir" \
+    "$inventory_dir/packages-dpkg.ndjson" "$inventory_dir/collectors-dpkg.ndjson" &
+  _security_collect_rpm_inventory "$config_json" "$inventory_dir" \
+    "$inventory_dir/packages-rpm.ndjson" "$inventory_dir/collectors-rpm.ndjson" &
+  _security_collect_pacman_inventory "$config_json" "$inventory_dir" \
+    "$inventory_dir/packages-pacman.ndjson" "$inventory_dir/collectors-pacman.ndjson" &
+  _security_collect_snap_inventory "$config_json" "$inventory_dir" \
+    "$inventory_dir/packages-snap.ndjson" "$inventory_dir/collectors-snap.ndjson" &
+  _security_collect_flatpak_inventory "$config_json" "$inventory_dir" \
+    "$inventory_dir/packages-flatpak.ndjson" "$inventory_dir/collectors-flatpak.ndjson" &
 
   wait
 
@@ -1694,6 +1877,255 @@ _security_collect_dotnet_inventory() {
   fi
 }
 
+#---------------------------------------------------------------------------------------------------
+# Linux native package managers
+#---------------------------------------------------------------------------------------------------
+
+# Resolve the OSV-compatible ecosystem identifier for dpkg-installed packages.
+# Debian/Ubuntu derivatives map to "Debian:<VERSION_ID>" or "Ubuntu:<VERSION_ID>".
+# Other distros (or missing /etc/os-release) fall back to the generic "Debian"
+# label so packages still appear in inventory; the OSV scanner will treat the
+# unversioned label as non-queryable and rely on Grype.
+_security_dpkg_ecosystem() {
+  local distro version_id base
+  distro="$(platform_linux_distro 2>/dev/null || echo unknown)"
+  version_id="$(platform_linux_os_version_id 2>/dev/null || true)"
+  case "$distro" in
+    ubuntu) base="Ubuntu" ;;
+    *) base="Debian" ;;
+  esac
+  if [[ -n "$version_id" ]]; then
+    printf '%s:%s\n' "$base" "$version_id"
+  else
+    printf '%s\n' "$base"
+  fi
+}
+
+# Resolve the ecosystem label for rpm-installed packages.
+# OSV does not have a strong rpm-distro ecosystem (Rocky, Alma, RHEL etc.) so
+# we emit a coarse vendor label ("RHEL" / "Fedora" / "SUSE") that the OSV
+# scanner treats as partial-coverage; Grype provides actual vulnerability data.
+_security_rpm_ecosystem() {
+  local distro
+  distro="$(platform_linux_distro 2>/dev/null || echo unknown)"
+  case "$distro" in
+    fedora) printf 'Fedora\n' ;;
+    suse)   printf 'SUSE\n' ;;
+    *)      printf 'RHEL\n' ;;
+  esac
+}
+
+_security_collect_dpkg_inventory() {
+  local config_json="$1"
+  local inventory_dir="$2"
+  local packages_ndjson="$3"
+  local collectors_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.dpkg" "true")" != "true" ]]; then
+    _security_append_status "$collectors_ndjson" "dpkg" "false" "false" "true" "Collector disabled by config"
+    return 0
+  fi
+
+  if ! command_exists dpkg-query; then
+    _security_append_status "$collectors_ndjson" "dpkg" "true" "false" "false" "dpkg-query command not found"
+    return 0
+  fi
+
+  local ecosystem
+  ecosystem="$(_security_dpkg_ecosystem)"
+
+  local out_file="$inventory_dir/dpkg-list.tsv"
+  local err_file="$inventory_dir/dpkg-list.stderr"
+
+  if dpkg-query -W -f '${Package}\t${Version}\n' >"$out_file" 2>"$err_file"; then
+    local name version
+    while IFS=$'\t' read -r name version; do
+      [[ -z "$name" || -z "$version" ]] && continue
+      _security_append_package "$packages_ndjson" "dpkg" "$ecosystem" "$name" "$version" "/var/lib/dpkg/status" "" "0" "unknown" ""
+    done < "$out_file"
+    _security_append_status "$collectors_ndjson" "dpkg" "true" "true" "true" "Collected dpkg installed packages (ecosystem=$ecosystem)" "$out_file"
+  else
+    _security_append_status "$collectors_ndjson" "dpkg" "true" "true" "false" "dpkg-query -W failed" "$err_file"
+  fi
+}
+
+_security_collect_rpm_inventory() {
+  local config_json="$1"
+  local inventory_dir="$2"
+  local packages_ndjson="$3"
+  local collectors_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.rpm" "true")" != "true" ]]; then
+    _security_append_status "$collectors_ndjson" "rpm" "false" "false" "true" "Collector disabled by config"
+    return 0
+  fi
+
+  if ! command_exists rpm; then
+    _security_append_status "$collectors_ndjson" "rpm" "true" "false" "false" "rpm command not found"
+    return 0
+  fi
+
+  # The rpm binary alone doesn't mean this host is RPM-managed (Ubuntu CI
+  # runners ship rpm-common without an rpmdb). Require an actual DB.
+  local rpm_dbpath
+  rpm_dbpath="$(rpm --eval '%_dbpath' 2>/dev/null || echo /var/lib/rpm)"
+  if [[ ! -d "$rpm_dbpath" ]] || ! ls -A "$rpm_dbpath" >/dev/null 2>&1; then
+    _security_append_status "$collectors_ndjson" "rpm" "true" "false" "true" "rpm binary present but no rpmdb at $rpm_dbpath"
+    return 0
+  fi
+
+  local ecosystem
+  ecosystem="$(_security_rpm_ecosystem)"
+
+  local out_file="$inventory_dir/rpm-list.tsv"
+  local err_file="$inventory_dir/rpm-list.stderr"
+
+  if rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n' >"$out_file" 2>"$err_file"; then
+    local name version
+    while IFS=$'\t' read -r name version; do
+      [[ -z "$name" || -z "$version" ]] && continue
+      _security_append_package "$packages_ndjson" "rpm" "$ecosystem" "$name" "$version" "/var/lib/rpm" "" "0" "unknown" ""
+    done < "$out_file"
+    _security_append_status "$collectors_ndjson" "rpm" "true" "true" "true" "Collected rpm installed packages (ecosystem=$ecosystem)" "$out_file"
+  else
+    _security_append_status "$collectors_ndjson" "rpm" "true" "true" "false" "rpm -qa failed" "$err_file"
+  fi
+}
+
+_security_collect_pacman_inventory() {
+  local config_json="$1"
+  local inventory_dir="$2"
+  local packages_ndjson="$3"
+  local collectors_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.pacman" "true")" != "true" ]]; then
+    _security_append_status "$collectors_ndjson" "pacman" "false" "false" "true" "Collector disabled by config"
+    return 0
+  fi
+
+  if ! command_exists pacman; then
+    _security_append_status "$collectors_ndjson" "pacman" "true" "false" "false" "pacman command not found"
+    return 0
+  fi
+
+  # Don't claim pacman as available without a local package DB.
+  if [[ ! -d /var/lib/pacman/local ]]; then
+    _security_append_status "$collectors_ndjson" "pacman" "true" "false" "true" "pacman binary present but no /var/lib/pacman/local"
+    return 0
+  fi
+
+  local out_file="$inventory_dir/pacman-list.txt"
+  local err_file="$inventory_dir/pacman-list.stderr"
+  local explicit_file="$inventory_dir/pacman-explicit.txt"
+
+  # Capture the explicit set so we can flag installType.
+  local -A explicit_set=()
+  if pacman -Qe >"$explicit_file" 2>/dev/null; then
+    local ex_name
+    while IFS=' ' read -r ex_name _; do
+      [[ -n "$ex_name" ]] && explicit_set["$ex_name"]=1
+    done < "$explicit_file"
+  fi
+
+  if pacman -Q >"$out_file" 2>"$err_file"; then
+    local name version install_type
+    while IFS=' ' read -r name version; do
+      [[ -z "$name" || -z "$version" ]] && continue
+      if [[ -n "${explicit_set[$name]:-}" ]]; then
+        install_type="direct"
+      else
+        install_type="dependency"
+      fi
+      _security_append_package "$packages_ndjson" "pacman" "Arch" "$name" "$version" "/var/lib/pacman/local" "" "0" "$install_type" ""
+    done < "$out_file"
+    _security_append_status "$collectors_ndjson" "pacman" "true" "true" "true" "Collected pacman installed packages" "$out_file"
+  else
+    _security_append_status "$collectors_ndjson" "pacman" "true" "true" "false" "pacman -Q failed" "$err_file"
+  fi
+}
+
+_security_collect_snap_inventory() {
+  local config_json="$1"
+  local inventory_dir="$2"
+  local packages_ndjson="$3"
+  local collectors_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.snap" "true")" != "true" ]]; then
+    _security_append_status "$collectors_ndjson" "snap" "false" "false" "true" "Collector disabled by config"
+    return 0
+  fi
+
+  if ! command_exists snap; then
+    _security_append_status "$collectors_ndjson" "snap" "true" "false" "false" "snap command not found"
+    return 0
+  fi
+
+  # snapd needs to be active for `snap list` to return anything meaningful.
+  # Treat the collector as unavailable when the daemon isn't running.
+  if ! snap list --color=never >/dev/null 2>&1; then
+    _security_append_status "$collectors_ndjson" "snap" "true" "false" "true" "snap binary present but snapd not active"
+    return 0
+  fi
+
+  local out_file="$inventory_dir/snap-list.txt"
+  local err_file="$inventory_dir/snap-list.stderr"
+
+  if snap list --color=never >"$out_file" 2>"$err_file"; then
+    # snap list columns: Name Version Rev Tracking Publisher Notes
+    local name version
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      name="$(awk '{print $1}' <<<"$line")"
+      version="$(awk '{print $2}' <<<"$line")"
+      [[ "$name" == "Name" ]] && continue
+      [[ -z "$name" || -z "$version" ]] && continue
+      _security_append_package "$packages_ndjson" "snap" "Snap" "$name" "$version" "snap list" "" "0" "direct" ""
+    done < "$out_file"
+    _security_append_status "$collectors_ndjson" "snap" "true" "true" "true" "Collected snap installed packages" "$out_file"
+  else
+    _security_append_status "$collectors_ndjson" "snap" "true" "true" "false" "snap list failed" "$err_file"
+  fi
+}
+
+_security_collect_flatpak_inventory() {
+  local config_json="$1"
+  local inventory_dir="$2"
+  local packages_ndjson="$3"
+  local collectors_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.flatpak" "true")" != "true" ]]; then
+    _security_append_status "$collectors_ndjson" "flatpak" "false" "false" "true" "Collector disabled by config"
+    return 0
+  fi
+
+  if ! command_exists flatpak; then
+    _security_append_status "$collectors_ndjson" "flatpak" "true" "false" "false" "flatpak command not found"
+    return 0
+  fi
+
+  # Don't claim flatpak as available without a configured installation.
+  if ! flatpak --installations >/dev/null 2>&1; then
+    _security_append_status "$collectors_ndjson" "flatpak" "true" "false" "true" "flatpak binary present but no installations configured"
+    return 0
+  fi
+
+  local out_file="$inventory_dir/flatpak-list.tsv"
+  local err_file="$inventory_dir/flatpak-list.stderr"
+
+  if flatpak list --columns=application,version --app >"$out_file" 2>"$err_file"; then
+    local name version
+    while IFS=$'\t' read -r name version; do
+      [[ -z "$name" ]] && continue
+      # flatpak omits version for some apps; keep them visible with a sentinel
+      [[ -z "$version" ]] && version="unknown"
+      _security_append_package "$packages_ndjson" "flatpak" "Flatpak" "$name" "$version" "flatpak list --app" "" "0" "direct" ""
+    done < "$out_file"
+    _security_append_status "$collectors_ndjson" "flatpak" "true" "true" "true" "Collected flatpak installed apps" "$out_file"
+  else
+    _security_append_status "$collectors_ndjson" "flatpak" "true" "true" "false" "flatpak list failed" "$err_file"
+  fi
+}
+
 _security_collect_outdated() {
   local config_json="$1"
   local outdated_dir="$2"
@@ -1710,11 +2142,21 @@ _security_collect_outdated() {
     _security_collect_npm_outdated "$outdated_dir" "$items_ndjson" "$checks_ndjson"
     _security_collect_python_outdated "$outdated_dir" "$items_ndjson" "$checks_ndjson"
     _security_collect_rubygems_outdated "$config_json" "$outdated_dir" "$items_ndjson" "$checks_ndjson"
+    _security_collect_dpkg_outdated "$config_json" "$outdated_dir" "$items_ndjson" "$checks_ndjson"
+    _security_collect_rpm_outdated "$config_json" "$outdated_dir" "$items_ndjson" "$checks_ndjson"
+    _security_collect_pacman_outdated "$config_json" "$outdated_dir" "$items_ndjson" "$checks_ndjson"
+    _security_collect_snap_outdated "$config_json" "$outdated_dir" "$items_ndjson" "$checks_ndjson"
+    _security_collect_flatpak_outdated "$config_json" "$outdated_dir" "$items_ndjson" "$checks_ndjson"
   else
     _security_append_status "$checks_ndjson" "homebrew-outdated" "true" "false" "true" "Skipped in offline mode"
     _security_append_status "$checks_ndjson" "npm-outdated" "true" "false" "true" "Skipped in offline mode"
     _security_append_status "$checks_ndjson" "python-pip-outdated" "true" "false" "true" "Skipped in offline mode"
     _security_append_status "$checks_ndjson" "rubygems-outdated" "true" "false" "true" "Skipped in offline mode"
+    _security_append_status "$checks_ndjson" "dpkg-outdated" "true" "false" "true" "Skipped in offline mode"
+    _security_append_status "$checks_ndjson" "rpm-outdated" "true" "false" "true" "Skipped in offline mode"
+    _security_append_status "$checks_ndjson" "pacman-outdated" "true" "false" "true" "Skipped in offline mode"
+    _security_append_status "$checks_ndjson" "snap-outdated" "true" "false" "true" "Skipped in offline mode"
+    _security_append_status "$checks_ndjson" "flatpak-outdated" "true" "false" "true" "Skipped in offline mode"
   fi
 
   if [[ -s "$items_ndjson" ]]; then
@@ -1852,6 +2294,228 @@ _security_collect_rubygems_outdated() {
     _security_append_status "$checks_ndjson" "rubygems-outdated" "true" "true" "true" "Collected gem outdated output" "$out_file"
   else
     _security_append_status "$checks_ndjson" "rubygems-outdated" "true" "true" "false" "gem outdated failed" "$err_file"
+  fi
+}
+
+#---------------------------------------------------------------------------------------------------
+# Linux outdated checks
+#---------------------------------------------------------------------------------------------------
+
+_security_collect_dpkg_outdated() {
+  local config_json="$1"
+  local outdated_dir="$2"
+  local items_ndjson="$3"
+  local checks_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.dpkg" "true")" != "true" ]]; then
+    _security_append_status "$checks_ndjson" "dpkg-outdated" "false" "false" "true" "Check disabled by config (inventory.dpkg=false)"
+    return 0
+  fi
+
+  if ! command_exists apt; then
+    _security_append_status "$checks_ndjson" "dpkg-outdated" "true" "false" "false" "apt command not found"
+    return 0
+  fi
+
+  local out_file="$outdated_dir/apt-upgradable.txt"
+  local err_file="$outdated_dir/apt-upgradable.stderr"
+
+  # `apt list --upgradable` prints lines like:
+  #   pkg/suite new-version arch [upgradable from: old-version]
+  # The first line is "Listing..." which we skip.
+  if apt list --upgradable >"$out_file" 2>"$err_file"; then
+    local line name latest current
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      [[ "$line" == Listing* ]] && continue
+      [[ "$line" =~ ^([A-Za-z0-9.+-]+)/[^[:space:]]+[[:space:]]+([^[:space:]]+)[[:space:]]+[^[:space:]]+[[:space:]]+\[upgradable[[:space:]]+from:[[:space:]]+([^][:space:]]+)\]$ ]] || continue
+      name="${BASH_REMATCH[1]}"
+      latest="${BASH_REMATCH[2]}"
+      current="${BASH_REMATCH[3]}"
+      _security_append_outdated_item "$items_ndjson" "dpkg" "$name" "$current" "$latest"
+    done < "$out_file"
+    _security_append_status "$checks_ndjson" "dpkg-outdated" "true" "true" "true" "Collected apt list --upgradable output" "$out_file"
+  else
+    _security_append_status "$checks_ndjson" "dpkg-outdated" "true" "true" "false" "apt list --upgradable failed" "$err_file"
+  fi
+}
+
+_security_collect_rpm_outdated() {
+  local config_json="$1"
+  local outdated_dir="$2"
+  local items_ndjson="$3"
+  local checks_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.rpm" "true")" != "true" ]]; then
+    _security_append_status "$checks_ndjson" "rpm-outdated" "false" "false" "true" "Check disabled by config (inventory.rpm=false)"
+    return 0
+  fi
+
+  local tool=""
+  if command_exists dnf; then
+    tool="dnf"
+  elif command_exists yum; then
+    tool="yum"
+  else
+    _security_append_status "$checks_ndjson" "rpm-outdated" "true" "false" "false" "neither dnf nor yum found"
+    return 0
+  fi
+
+  local out_file="$outdated_dir/${tool}-check-update.txt"
+  local err_file="$outdated_dir/${tool}-check-update.stderr"
+
+  # dnf/yum check-update exits 100 when updates are available — that's success
+  # for our purposes. 0 means no updates. Anything else is a real error.
+  local rc=0
+  set +e
+  "$tool" check-update --quiet >"$out_file" 2>"$err_file"
+  rc=$?
+  set -e
+
+  case "$rc" in
+    0)
+      _security_append_status "$checks_ndjson" "rpm-outdated" "true" "true" "true" "$tool check-update reported no updates" "$out_file"
+      return 0
+      ;;
+    100)
+      : # updates available; parse below
+      ;;
+    *)
+      _security_append_status "$checks_ndjson" "rpm-outdated" "true" "true" "false" "$tool check-update failed (exit=$rc)" "$err_file"
+      return 0
+      ;;
+  esac
+
+  # Output rows look like:  <name>.<arch>   <new-version>   <repo>
+  # Continuation lines (e.g. obsoleted packages section) are headed by blank
+  # lines or non-version columns; we filter to lines with three space-separated
+  # fields where the first contains a dot (architecture suffix).
+  local line name_arch new_ver name
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    # shellcheck disable=SC2206
+    local -a fields=($line)
+    [[ "${#fields[@]}" -lt 3 ]] && continue
+    name_arch="${fields[0]}"
+    new_ver="${fields[1]}"
+    [[ "$name_arch" != *.* ]] && continue
+    name="${name_arch%.*}"
+    _security_append_outdated_item "$items_ndjson" "rpm" "$name" "" "$new_ver"
+  done < "$out_file"
+
+  _security_append_status "$checks_ndjson" "rpm-outdated" "true" "true" "true" "Collected $tool check-update output (exit=100, updates available)" "$out_file"
+}
+
+_security_collect_pacman_outdated() {
+  local config_json="$1"
+  local outdated_dir="$2"
+  local items_ndjson="$3"
+  local checks_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.pacman" "true")" != "true" ]]; then
+    _security_append_status "$checks_ndjson" "pacman-outdated" "false" "false" "true" "Check disabled by config (inventory.pacman=false)"
+    return 0
+  fi
+
+  if ! command_exists pacman; then
+    _security_append_status "$checks_ndjson" "pacman-outdated" "true" "false" "false" "pacman command not found"
+    return 0
+  fi
+
+  local out_file="$outdated_dir/pacman-Qu.txt"
+  local err_file="$outdated_dir/pacman-Qu.stderr"
+
+  # `pacman -Qu` exits 1 when there are no updates (or when the sync DB hasn't
+  # been refreshed). Treat empty output as "no updates"; non-empty parse output.
+  # Lines look like:  pkg current -> latest
+  set +e
+  pacman -Qu >"$out_file" 2>"$err_file"
+  local rc=$?
+  set -e
+
+  if [[ "$rc" -ne 0 && ! -s "$out_file" ]]; then
+    _security_append_status "$checks_ndjson" "pacman-outdated" "true" "true" "true" "pacman -Qu reported no updates (or sync DB not refreshed; consider 'pacman -Sy')" "$err_file"
+    return 0
+  fi
+
+  local line name current latest
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if [[ "$line" =~ ^([A-Za-z0-9.+_-]+)[[:space:]]+([^[:space:]]+)[[:space:]]+-\>[[:space:]]+([^[:space:]]+)$ ]]; then
+      name="${BASH_REMATCH[1]}"
+      current="${BASH_REMATCH[2]}"
+      latest="${BASH_REMATCH[3]}"
+      _security_append_outdated_item "$items_ndjson" "pacman" "$name" "$current" "$latest"
+    fi
+  done < "$out_file"
+
+  _security_append_status "$checks_ndjson" "pacman-outdated" "true" "true" "true" "Collected pacman -Qu output" "$out_file"
+}
+
+_security_collect_snap_outdated() {
+  local config_json="$1"
+  local outdated_dir="$2"
+  local items_ndjson="$3"
+  local checks_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.snap" "true")" != "true" ]]; then
+    _security_append_status "$checks_ndjson" "snap-outdated" "false" "false" "true" "Check disabled by config (inventory.snap=false)"
+    return 0
+  fi
+
+  if ! command_exists snap; then
+    _security_append_status "$checks_ndjson" "snap-outdated" "true" "false" "false" "snap command not found"
+    return 0
+  fi
+
+  local out_file="$outdated_dir/snap-refresh-list.txt"
+  local err_file="$outdated_dir/snap-refresh-list.stderr"
+
+  if snap refresh --list >"$out_file" 2>"$err_file"; then
+    # First line is a header: Name Version Rev ... -- skip it.
+    local line name latest
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      name="$(awk '{print $1}' <<<"$line")"
+      [[ "$name" == "Name" ]] && continue
+      latest="$(awk '{print $2}' <<<"$line")"
+      [[ -z "$name" || -z "$latest" ]] && continue
+      _security_append_outdated_item "$items_ndjson" "snap" "$name" "" "$latest"
+    done < "$out_file"
+    _security_append_status "$checks_ndjson" "snap-outdated" "true" "true" "true" "Collected snap refresh --list output" "$out_file"
+  else
+    _security_append_status "$checks_ndjson" "snap-outdated" "true" "true" "false" "snap refresh --list failed" "$err_file"
+  fi
+}
+
+_security_collect_flatpak_outdated() {
+  local config_json="$1"
+  local outdated_dir="$2"
+  local items_ndjson="$3"
+  local checks_ndjson="$4"
+
+  if [[ "$(_config_bool "$config_json" ".inventory.flatpak" "true")" != "true" ]]; then
+    _security_append_status "$checks_ndjson" "flatpak-outdated" "false" "false" "true" "Check disabled by config (inventory.flatpak=false)"
+    return 0
+  fi
+
+  if ! command_exists flatpak; then
+    _security_append_status "$checks_ndjson" "flatpak-outdated" "true" "false" "false" "flatpak command not found"
+    return 0
+  fi
+
+  local out_file="$outdated_dir/flatpak-updates.tsv"
+  local err_file="$outdated_dir/flatpak-updates.stderr"
+
+  if flatpak remote-ls --updates --columns=application,version >"$out_file" 2>"$err_file"; then
+    local name latest
+    while IFS=$'\t' read -r name latest; do
+      [[ -z "$name" ]] && continue
+      _security_append_outdated_item "$items_ndjson" "flatpak" "$name" "" "$latest"
+    done < "$out_file"
+    _security_append_status "$checks_ndjson" "flatpak-outdated" "true" "true" "true" "Collected flatpak remote-ls --updates output" "$out_file"
+  else
+    _security_append_status "$checks_ndjson" "flatpak-outdated" "true" "true" "false" "flatpak remote-ls --updates failed" "$err_file"
   fi
 }
 
@@ -2523,11 +3187,19 @@ _security_scan_osv() {
   fi
 
   local query_packages_file="$scans_dir/osv-query-packages.json"
+  # OSV recognises a fixed set of ecosystems (https://ossf.github.io/osv-schema/).
+  # We accept the language ecosystems we already collect plus the OSV-supported
+  # OS distributions (Debian:<ver>, Ubuntu:<ver>, Alpine:v<ver>) emitted by the
+  # dpkg collector. RPM/pacman/snap/flatpak are *not* OSV-queryable and are
+  # intentionally filtered out here; Grype provides their vulnerability data.
   jq '
     [
       .[] |
       select(.ecosystem != null and .name != null and .name != "" and .version != null and .version != "") |
-      select((.ecosystem as $e | ["npm", "PyPI", "crates.io", "RubyGems", "NuGet", "Go"] | index($e)) != null) |
+      select(
+        (.ecosystem as $e | ["npm", "PyPI", "crates.io", "RubyGems", "NuGet", "Go"] | index($e)) != null
+        or (.ecosystem | test("^(Debian|Ubuntu|Alpine):"))
+      ) |
       {
         manager,
         ecosystem,
@@ -2540,6 +3212,16 @@ _security_scan_osv() {
     ]
     | unique_by(.ecosystem, .name, .version)
   ' "$packages_file" > "$query_packages_file"
+
+  # Count packages from native managers OSV cannot query, so we can flag the
+  # OSV scanner as providing only partial coverage on Linux hosts.
+  local skipped_native
+  skipped_native="$(jq '[.[] | select(.manager // "" | IN("rpm","pacman","snap","flatpak"))] | length' "$packages_file" 2>/dev/null || echo 0)"
+  if [[ "${skipped_native:-0}" -gt 0 ]]; then
+    _security_append_status "$scanners_ndjson" "osv-coverage" "true" "true" "true" \
+      "Partial coverage: $skipped_native packages from rpm/pacman/snap/flatpak skipped (OSV does not index these ecosystems; rely on Grype)" \
+      "$query_packages_file"
+  fi
 
   local total
   total="$(jq 'length' "$query_packages_file")"

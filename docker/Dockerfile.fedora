@@ -1,0 +1,16 @@
+# Fedora smoke harness for the Revelio CLI.
+# Exercises the rpm/dnf collector path on a redhat-family base.
+FROM fedora:40
+
+RUN dnf install -y \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    ShellCheck \
+  && dnf clean all
+
+WORKDIR /work
+
+CMD ["bash", "./ci-smoke.sh"]
