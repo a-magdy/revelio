@@ -136,8 +136,11 @@ main() {
   jq --arg url "$publish_bare" \
      '.publish.enabled = true | .publish.repoUrl = $url | .publish.branch = "main"' \
      "$SCRIPT_DIR/revelio.config.json" > "$publish_cfg"
-  if ! "$CLI_ENTRYPOINT" publish --run "$diff_run_b" --config "$publish_cfg" --dry-run >/dev/null 2>&1; then
+  if ! "$CLI_ENTRYPOINT" publish --run "$diff_run_b" --config "$publish_cfg" --dry-run --force >"$publish_tmp/out" 2>&1; then
     print_error "Smoke test failed: publish --dry-run failed"
+    printf '%s\n' "----- publish command output -----" >&2
+    cat "$publish_tmp/out" >&2 || true
+    printf '%s\n' "-----------------------------------" >&2
     rm -rf "$diff_tmp" "$publish_tmp"
     return 1
   fi
