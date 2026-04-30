@@ -1,6 +1,8 @@
 # revelio
 
-**Host-level dependency audit CLI for macOS.**
+[![CI](https://github.com/a-magdy/revelio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/a-magdy/revelio/actions/workflows/ci.yml)
+
+**Host-level dependency audit CLI for macOS and Linux.**
 
 Revelio inventories the tools installed on your machine, checks what is outdated, correlates findings across multiple vulnerability sources, and tells you which top-level package is responsible. It is designed for the stuff project-scoped scanners miss: global CLIs, language toolchains, package-manager installs, and transitive dependencies already living on your laptop.
 
