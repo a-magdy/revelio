@@ -227,13 +227,26 @@ main() {
   print_info "Running Linux native package manager smoke checks (best-effort)..."
   local packages_file linux_mgr linux_bin checked=0
   packages_file="$run_dir/inventory/packages.json"
-  # Map: collector toggle <-> manager value emitted in packages.json.
-  # Each entry is "<binary>:<manager>". We only assert when the binary exists
-  # on the host (so this loop is a no-op on macOS).
-  for entry in "dpkg-query:dpkg" "rpm:rpm" "pacman:pacman" "snap:snap" "flatpak:flatpak"; do
+  # We assert presence of inventory rows only when the manager is *truly*
+  # available on this host (not just the binary). This mirrors the
+  # availability gate inside each collector, so dev shells / CI runners
+  # that ship the binary without a real database don't trigger false
+  # positives. Each entry is "<binary>:<manager>:<availability_test>".
+  for entry in \
+      "dpkg-query:dpkg:[[ -d /var/lib/dpkg ]]" \
+      "rpm:rpm:[[ -d \$(rpm --eval '%_dbpath' 2>/dev/null || echo /var/lib/rpm) ]] && ls -A \$(rpm --eval '%_dbpath' 2>/dev/null || echo /var/lib/rpm) >/dev/null 2>&1" \
+      "pacman:pacman:[[ -d /var/lib/pacman/local ]]" \
+      "snap:snap:snap list --color=never >/dev/null 2>&1" \
+      "flatpak:flatpak:flatpak --installations >/dev/null 2>&1"; do
     linux_bin="${entry%%:*}"
-    linux_mgr="${entry##*:}"
+    local rest="${entry#*:}"
+    linux_mgr="${rest%%:*}"
+    local availability_test="${rest#*:}"
     if ! command -v "$linux_bin" >/dev/null 2>&1; then
+      continue
+    fi
+    if ! eval "$availability_test"; then
+      print_info "  ($linux_bin present but no live $linux_mgr database; skipped)"
       continue
     fi
     checked=$((checked + 1))

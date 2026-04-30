@@ -1965,6 +1965,15 @@ _security_collect_rpm_inventory() {
     return 0
   fi
 
+  # The rpm binary alone doesn't mean this host is RPM-managed (Ubuntu CI
+  # runners ship rpm-common without an rpmdb). Require an actual DB.
+  local rpm_dbpath
+  rpm_dbpath="$(rpm --eval '%_dbpath' 2>/dev/null || echo /var/lib/rpm)"
+  if [[ ! -d "$rpm_dbpath" ]] || ! ls -A "$rpm_dbpath" >/dev/null 2>&1; then
+    _security_append_status "$collectors_ndjson" "rpm" "true" "false" "true" "rpm binary present but no rpmdb at $rpm_dbpath"
+    return 0
+  fi
+
   local ecosystem
   ecosystem="$(_security_rpm_ecosystem)"
 
@@ -1996,6 +2005,12 @@ _security_collect_pacman_inventory() {
 
   if ! command_exists pacman; then
     _security_append_status "$collectors_ndjson" "pacman" "true" "false" "false" "pacman command not found"
+    return 0
+  fi
+
+  # Don't claim pacman as available without a local package DB.
+  if [[ ! -d /var/lib/pacman/local ]]; then
+    _security_append_status "$collectors_ndjson" "pacman" "true" "false" "true" "pacman binary present but no /var/lib/pacman/local"
     return 0
   fi
 
@@ -2045,6 +2060,13 @@ _security_collect_snap_inventory() {
     return 0
   fi
 
+  # snapd needs to be active for `snap list` to return anything meaningful.
+  # Treat the collector as unavailable when the daemon isn't running.
+  if ! snap list --color=never >/dev/null 2>&1; then
+    _security_append_status "$collectors_ndjson" "snap" "true" "false" "true" "snap binary present but snapd not active"
+    return 0
+  fi
+
   local out_file="$inventory_dir/snap-list.txt"
   local err_file="$inventory_dir/snap-list.stderr"
 
@@ -2078,6 +2100,12 @@ _security_collect_flatpak_inventory() {
 
   if ! command_exists flatpak; then
     _security_append_status "$collectors_ndjson" "flatpak" "true" "false" "false" "flatpak command not found"
+    return 0
+  fi
+
+  # Don't claim flatpak as available without a configured installation.
+  if ! flatpak --installations >/dev/null 2>&1; then
+    _security_append_status "$collectors_ndjson" "flatpak" "true" "false" "true" "flatpak binary present but no installations configured"
     return 0
   fi
 
