@@ -172,8 +172,8 @@ _diff_compute() {
     | ($cand_report_arr[0]) as $cand_report
     # Build advisory maps the long way (reduce) to preserve duplicate keys as
     # arrays rather than silently collapsing them as `from_entries` would.
-    | reduce ($base_adv[]) as $a ({}; .[($a | adv_key)] += [$a]) as $base_map
-    | reduce ($cand_adv[]) as $a ({}; .[($a | adv_key)] += [$a]) as $cand_map
+    | (reduce ($base_adv[]) as $a ({}; .[($a | adv_key)] += [$a])) as $base_map
+    | (reduce ($cand_adv[]) as $a ({}; .[($a | adv_key)] += [$a])) as $cand_map
 
     | ($base_map | keys_unsorted) as $base_keys
     | ($cand_map | keys_unsorted) as $cand_keys
@@ -186,8 +186,8 @@ _diff_compute() {
         | map($cand_map[.][0])) as $unchanged_findings
 
     # Build inventory maps: key -> first matching package record.
-    | reduce ($base_pkgs[]) as $p ({}; .[($p | pkg_key)] = $p) as $base_pkg_map
-    | reduce ($cand_pkgs[]) as $p ({}; .[($p | pkg_key)] = $p) as $cand_pkg_map
+    | (reduce ($base_pkgs[]) as $p ({}; .[($p | pkg_key)] = $p)) as $base_pkg_map
+    | (reduce ($cand_pkgs[]) as $p ({}; .[($p | pkg_key)] = $p)) as $cand_pkg_map
 
     | ($base_pkg_map | keys_unsorted) as $base_pkg_keys
     | ($cand_pkg_map | keys_unsorted) as $cand_pkg_keys
