@@ -336,6 +336,17 @@ _run_scan_or_inventory() {
     export REVELIO_QUIET=1
   fi
 
+  # Startup banner — shown only in interactive tty sessions.
+  if [[ "${REVELIO_QUIET:-0}" != "1" && -t 1 ]]; then
+    printf '%s  ╲  │  ╱%s\n' "$_C_DIM" "$_C_RESET"
+    printf '%s───╴%s◉%s╶──%s  %srevelio%s  %s·  %s%s\n' \
+      "$_C_PURPLE" "$_C_GREEN" "$_C_PURPLE" "$_C_RESET" \
+      "$_C_BOLD" "$_C_RESET" \
+      "$_C_PURPLE" "$mode" "$_C_RESET"
+    printf '%s  ╱  │  ╲%s\n' "$_C_DIM" "$_C_RESET"
+    printf '\n'
+  fi
+
   security_run "$mode" "$effective_config" || return 1
 
   if [[ "$SCAN_JSON" == "true" ]]; then
