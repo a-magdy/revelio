@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>revelio — host dependency audit</title>
+  <meta name="description" content="Inventory every installed package across all managers, check for vulnerabilities, and get actionable remediation — one Bash command, no cloud, no account." />
+  <meta property="og:title" content="revelio — host dependency audit" />
+  <meta property="og:description" content="Host-level dependency audit CLI for macOS and Linux. No cloud, no account, one scan." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #0E1116;
+      --surface:   #161B22;
+      --surface-2: #1F2630;
+      --surface-3: #252C38;
+      --purple:    #7B5BE6;
+      --purple-a:  rgba(123,91,230,.12);
+      --purple-b:  rgba(123,91,230,.28);
+      --green:     #2EB872;
+      --text:      #F7F4EC;
+      --muted:     #8B8FA8;
+      --border:    #21262d;
+      --radius:    10px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem; height: 60px;
+      background: rgba(14,17,22,.9);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 600; font-size: 1rem; letter-spacing: -.02em;
+    }
+    .nav-brand svg { width: 28px; height: 28px; flex-shrink: 0; }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; }
+    .nav-links a { color: var(--muted); font-size: .88rem; transition: color .15s; }
+    .nav-links a:hover { color: var(--text); }
+    .btn-gh {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: .83rem; color: var(--text) !important;
+      transition: border-color .15s, background .15s;
+    }
+    .btn-gh:hover { background: var(--surface); border-color: var(--purple); }
+    .gh-icon { width: 14px; height: 14px; fill: currentColor; }
+
+    /* ── HERO ── */
+    .hero {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 4rem; align-items: center;
+      max-width: 1160px; margin: 0 auto;
+      padding: 7rem 2rem 5rem;
+    }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 4px 12px;
+      background: var(--purple-a); border: 1px solid var(--purple-b);
+      border-radius: 100px;
+      font-size: .78rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--purple); margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2.6rem,5vw,3.8rem);
+      font-weight: 700; letter-spacing: -.04em; line-height: 1.08;
+      margin-bottom: 1.25rem;
+    }
+    .hero h1 em { color: var(--purple); font-style: normal; }
+    .hero-sub {
+      font-size: 1.05rem; color: var(--muted); line-height: 1.72;
+      margin-bottom: 2.25rem; max-width: 460px;
+    }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 11px 22px; background: var(--purple); color: #fff;
+      border-radius: 8px; font-size: .93rem; font-weight: 600;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn-primary:hover { opacity: .88; transform: translateY(-1px); }
+    .btn-outline {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 11px 22px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: .93rem; font-weight: 500; color: var(--muted);
+      transition: border-color .15s, color .15s;
+    }
+    .btn-outline:hover { border-color: var(--purple); color: var(--text); }
+
+    /* ── TERMINAL ── */
+    .terminal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.04);
+    }
+    .term-bar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 11px 16px; background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .dot.r { background: #ff5f57; }
+    .dot.y { background: #ffbd2e; }
+    .dot.g { background: #28c840; }
+    .term-title {
+      margin-left: 6px; font-size: .78rem; color: var(--muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .term-body {
+      padding: 1.1rem 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .78rem; line-height: 1.8; color: var(--text);
+      white-space: pre; overflow-x: auto;
+    }
+    .tg { color: var(--green); }
+    .tp { color: var(--purple); }
+    .tr { color: #ff6b6b; }
+    .ty { color: #ffd93d; }
+    .tc { color: #79c0ff; }
+    .td { color: var(--muted); }
+    .tb { font-weight: 700; }
+
+    /* ── SHARED SECTION STYLES ── */
+    section { padding: 5rem 2rem; }
+    .inner { max-width: 1160px; margin: 0 auto; }
+    .sec-label {
+      font-size: .75rem; font-weight: 600; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--purple); margin-bottom: .6rem;
+    }
+    .sec-title {
+      font-size: clamp(1.5rem,3vw,2rem);
+      font-weight: 700; letter-spacing: -.03em; margin-bottom: .7rem;
+    }
+    .sec-sub { color: var(--muted); font-size: .975rem; max-width: 520px; }
+
+    /* ── MANAGER STRIP ── */
+    .strip {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 1.1rem 2rem;
+    }
+    .strip .inner {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    .strip-label { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+    .pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .pill {
+      padding: 3px 9px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      font-size: .72rem; font-family: 'JetBrains Mono', monospace; color: var(--muted);
+    }
+    .pill.lx { border-color: var(--purple-b); color: rgba(123,91,230,.75); }
+
+    /* ── FEATURES ── */
+    .feat-bg { background: var(--surface); }
+    .feat-grid {
+      display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr));
+      gap: 1.25rem; margin-top: 3rem;
+    }
+    .feat-card {
+      padding: 1.6rem; background: var(--bg);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      transition: border-color .2s;
+    }
+    .feat-card:hover { border-color: var(--purple-b); }
+    .feat-icon {
+      width: 38px; height: 38px; border-radius: 8px;
+      background: var(--purple-a); border: 1px solid var(--purple-b);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; margin-bottom: 1rem;
+    }
+    .feat-card h3 { font-size: .95rem; font-weight: 600; margin-bottom: .4rem; }
+    .feat-card p { font-size: .875rem; color: var(--muted); line-height: 1.6; }
+    .feat-card p code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .78rem; color: var(--purple);
+      background: var(--purple-a); padding: 1px 5px; border-radius: 3px;
+    }
+
+    /* ── COMPARISON ── */
+    .cmp-wrap {
+      overflow-x: auto; margin-top: 3rem;
+      border-radius: var(--radius); border: 1px solid var(--border);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    thead th {
+      padding: 11px 16px; text-align: left;
+      font-weight: 600; font-size: .82rem;
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+    }
+    thead th:first-child { color: var(--muted); }
+    thead th:nth-child(2) { color: var(--purple); }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,.015); }
+    tbody td { padding: 10px 16px; color: var(--muted); }
+    tbody td:first-child { color: var(--text); }
+    .yes     { color: var(--green) !important; font-weight: 500; }
+    .partial { color: #ffd93d !important; }
+    .no      { opacity: .22; }
+
+    /* ── QUICK START ── */
+    .qs-bg { background: var(--surface); }
+    .qs-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 3rem; margin-top: 3rem; align-items: start;
+    }
+    .steps { display: flex; flex-direction: column; gap: 1.75rem; }
+    .step { display: flex; gap: 1rem; }
+    .step-n {
+      width: 26px; height: 26px; min-width: 26px;
+      border-radius: 50%;
+      background: var(--purple-a); border: 1px solid var(--purple-b);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .72rem; font-weight: 700; color: var(--purple); margin-top: 2px;
+    }
+    .step-body h4 { font-size: .93rem; font-weight: 600; margin-bottom: .3rem; }
+    .step-body p { font-size: .85rem; color: var(--muted); line-height: 1.6; }
+    .step-body code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .78rem; color: var(--purple);
+      background: var(--purple-a); padding: 1px 5px; border-radius: 3px;
+    }
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+    }
+    .code-hdr {
+      padding: 9px 14px; background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+      font-size: .78rem; color: var(--muted); font-family: 'JetBrains Mono', monospace;
+    }
+    .code-block pre {
+      padding: 1.1rem 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .8rem; line-height: 1.85; overflow-x: auto;
+    }
+    .cc { color: var(--muted); }
+    .cg { color: var(--green); }
+    .ca { color: #a5d6ff; }
+
+    /* ── FOOTER ── */
+    footer { border-top: 1px solid var(--border); padding: 2.25rem 2rem; }
+    .foot-inner {
+      max-width: 1160px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 1rem;
+    }
+    .foot-brand {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .875rem; color: var(--muted);
+    }
+    .foot-brand svg { width: 20px; height: 20px; flex-shrink: 0; }
+    .foot-links { display: flex; gap: 1.5rem; font-size: .83rem; color: var(--muted); }
+    .foot-links a:hover { color: var(--text); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 860px) {
+      .hero { grid-template-columns: 1fr; gap: 2.5rem; padding: 4rem 1.5rem 3rem; }
+      .qs-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 540px) {
+      nav { padding: 0 1.25rem; }
+      .nav-links a:not(.btn-gh) { display: none; }
+      section { padding: 3.5rem 1.25rem; }
+      .strip { padding: 1rem 1.25rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-brand" href="#">
+    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="100" cy="100" r="78" fill="#161B22"/>
+      <path d="M 100 100 L 100 28 L 138 60 Z" fill="#1F2630"/>
+      <path d="M 100 100 L 100 28 L 138 60 Z" fill="#252C38" transform="rotate(60 100 100)"/>
+      <path d="M 100 100 L 100 28 L 138 60 Z" fill="#1F2630" transform="rotate(120 100 100)"/>
+      <path d="M 100 100 L 100 28 L 138 60 Z" fill="#252C38" transform="rotate(180 100 100)"/>
+      <path d="M 100 100 L 100 28 L 138 60 Z" fill="#1F2630" transform="rotate(240 100 100)"/>
+      <path d="M 100 100 L 100 28 L 138 60 Z" fill="#252C38" transform="rotate(300 100 100)"/>
+      <circle cx="100" cy="100" r="22" fill="#2EB872"/>
+      <path d="M 90 100 L 98 108 L 112 92" fill="none" stroke="#F7F4EC" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="100" cy="100" r="78" fill="none" stroke="#7B5BE6" stroke-width="2"/>
+    </svg>
+    revelio
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#compare">Compare</a>
+    <a href="#quickstart">Quick start</a>
+    <a class="btn-gh" href="https://github.com/a-magdy/revelio" target="_blank" rel="noopener">
+      <svg class="gh-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+      </svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div>
+    <div class="eyebrow">Bash &middot; macOS &middot; Linux</div>
+    <h1>Reveal what&#8217;s hiding<br/>on your <em>host</em></h1>
+    <p class="hero-sub">
+      Revelio inventories every package installed on your machine — across all managers — checks for outdated versions and CVEs, and tells you exactly which package to upgrade and why.
+    </p>
+    <div class="hero-actions">
+      <a class="btn-primary" href="#quickstart">Get started ↓</a>
+      <a class="btn-outline" href="https://github.com/a-magdy/revelio" target="_blank" rel="noopener">View on GitHub ↗</a>
+    </div>
+  </div>
+
+  <div class="terminal" role="img" aria-label="Example revelio scan output">
+    <div class="term-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="term-title">revelio scan</span>
+    </div>
+    <div class="term-body"><span class="tg">$</span> <span class="tb">./revelio.sh scan</span>
+
+<span class="tg">◉</span>  <span class="tb">revelio</span>  <span class="tp">·  scan</span>
+<span class="tp">──────────────────────────────────────────</span>
+<span class="td">  run  ~/.revelio/2026-05-01T12:34:56</span>
+
+ℹ️  Inventory packages tracked: <span class="tc">847</span>
+ℹ️  Outdated packages: <span class="ty">23</span>
+ℹ️  Vulnerabilities: total=<span class="tr">4</span> (critical=<span class="tr">1</span>, high=<span class="ty">2</span>, medium=<span class="td">1</span>)
+
+  <span class="tb">SEVERITY   MANAGER  PACKAGE</span>
+  <span class="td">─────────  ──────── ──────────────</span>
+  <span class="tr">CRITICAL</span>   brew     openssl@3
+  <span class="ty">HIGH</span>       npm      semver
+  <span class="ty">HIGH</span>       pip      pillow
+  <span class="td">MEDIUM</span>     cargo    hyper
+
+<span class="tg">✅ Policy passed: threshold &#39;high&#39; not exceeded</span></div>
+  </div>
+</div>
+
+<!-- MANAGER STRIP -->
+<div class="strip">
+  <div class="inner">
+    <span class="strip-label">Scans packages from</span>
+    <div class="pills">
+      <span class="pill">brew</span>
+      <span class="pill">npm</span>
+      <span class="pill">pip</span>
+      <span class="pill">pipx</span>
+      <span class="pill">uv</span>
+      <span class="pill">cargo</span>
+      <span class="pill">gem</span>
+      <span class="pill">go</span>
+      <span class="pill">dotnet</span>
+      <span class="pill lx">dpkg / apt</span>
+      <span class="pill lx">rpm / dnf</span>
+      <span class="pill lx">pacman</span>
+      <span class="pill lx">snap</span>
+      <span class="pill lx">flatpak</span>
+    </div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="feat-bg" id="features">
+  <div class="inner">
+    <p class="sec-label">Why revelio</p>
+    <h2 class="sec-title">Built for what project scanners miss</h2>
+    <p class="sec-sub">Project-scoped tools stop at your lockfile. Revelio starts where those leave off — the machine itself.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🖥</div>
+        <h3>Host-scoped inventory</h3>
+        <p>Enumerates what is actually installed via <code>brew list</code>, <code>pip list</code>, <code>gem list</code>, and more — not what a lockfile says should be there.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🔀</div>
+        <h3>Cross-scanner fusion</h3>
+        <p>Runs OSV, npm audit, pip-audit, cargo-audit, and Grype in parallel, then deduplicates findings by canonical identity — one advisory per CVE, not five.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">⚡</div>
+        <h3>Actionable attribution</h3>
+        <p>Maps each vulnerable transitive dependency back to the direct install you can actually upgrade, with a ready-made command and fix rationale.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">✓</div>
+        <h3>No cloud, no account</h3>
+        <p>A standalone Bash script with no agent, no SaaS subscription, and no data leaving your machine. Fully offline in inventory mode.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON -->
+<section id="compare">
+  <div class="inner">
+    <p class="sec-label">Comparison</p>
+    <h2 class="sec-title">How it compares</h2>
+    <p class="sec-sub">Most security scanners are project-scoped. Revelio is host-scoped: it audits what is installed on the machine, across all managers, in one run.</p>
+    <div class="cmp-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>revelio</th>
+            <th>Trivy</th>
+            <th>Grype</th>
+            <th>Snyk</th>
+            <th>OSV-scanner</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Host-level package-manager inventory</td>
+            <td class="yes">Yes</td><td class="partial">Partial</td><td class="partial">Partial</td><td class="no">No</td><td class="no">No</td>
+          </tr>
+          <tr>
+            <td>Multi-ecosystem host scan in one run</td>
+            <td class="yes">Yes</td><td class="no">No</td><td class="no">No</td><td class="partial">Partial</td><td class="no">No</td>
+          </tr>
+          <tr>
+            <td>Cross-scanner deduplication</td>
+            <td class="yes">Yes</td><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="no">No</td>
+          </tr>
+          <tr>
+            <td>Parent package attribution</td>
+            <td class="yes">Yes</td><td class="no">No</td><td class="no">No</td><td class="partial">Partial</td><td class="no">No</td>
+          </tr>
+          <tr>
+            <td>Remediation status guidance</td>
+            <td class="yes">Yes</td><td class="no">No</td><td class="no">No</td><td class="partial">Partial</td><td class="no">No</td>
+          </tr>
+          <tr>
+            <td>No account required</td>
+            <td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">No</td><td class="yes">Yes</td>
+          </tr>
+          <tr>
+            <td>Bash-native workflow</td>
+            <td class="yes">Yes</td><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="no">No</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START -->
+<section class="qs-bg" id="quickstart">
+  <div class="inner">
+    <p class="sec-label">Quick start</p>
+    <h2 class="sec-title">Up and running in seconds</h2>
+    <p class="sec-sub">No build step. No install script. Clone and run.</p>
+    <div class="qs-grid">
+      <div class="steps">
+        <div class="step">
+          <div class="step-n">1</div>
+          <div class="step-body">
+            <h4>Requirements</h4>
+            <p>macOS or Linux, <code>bash 4+</code>, <code>jq</code>, <code>curl</code>. On macOS run <code>brew install bash jq</code> — the system Bash 3.2 is not supported.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">2</div>
+          <div class="step-body">
+            <h4>Clone the repo</h4>
+            <p>No build step required. The CLI runs directly from the cloned directory using the scripts in place.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">3</div>
+          <div class="step-body">
+            <h4>Run a scan</h4>
+            <p>Inventories all managers, checks for outdated packages, queries OSV and other vulnerability sources, and prints a colour-coded summary.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">4</div>
+          <div class="step-body">
+            <h4>Schedule it</h4>
+            <p>Use <code>revelio schedule install</code> for recurring scans via launchd (macOS) or systemd-user / cron (Linux).</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-hdr">bash</div>
+        <pre><span class="cc"># Clone</span>
+<span class="cg">git</span> <span class="ca">clone https://github.com/a-magdy/revelio.git</span>
+<span class="cg">cd</span> <span class="ca">revelio</span>
+
+<span class="cc"># Full vulnerability scan</span>
+<span class="cg">./revelio.sh</span> <span class="ca">scan</span>
+
+<span class="cc"># Inventory only (offline)</span>
+<span class="cg">./revelio.sh</span> <span class="ca">inventory --offline</span>
+
+<span class="cc"># Explain why something is installed</span>
+<span class="cg">./revelio.sh</span> <span class="ca">why openssl@3</span>
+
+<span class="cc"># Compare two runs over time</span>
+<span class="cg">./revelio.sh</span> <span class="ca">diff ~/.revelio/run-a ~/.revelio/run-b</span>
+
+<span class="cc"># Schedule daily scans</span>
+<span class="cg">./revelio.sh</span> <span class="ca">schedule install --cadence daily</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="foot-inner">
+    <div class="foot-brand">
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="100" cy="100" r="78" fill="#161B22"/>
+        <path d="M 100 100 L 100 28 L 138 60 Z" fill="#1F2630"/>
+        <path d="M 100 100 L 100 28 L 138 60 Z" fill="#252C38" transform="rotate(60 100 100)"/>
+        <path d="M 100 100 L 100 28 L 138 60 Z" fill="#1F2630" transform="rotate(120 100 100)"/>
+        <path d="M 100 100 L 100 28 L 138 60 Z" fill="#252C38" transform="rotate(180 100 100)"/>
+        <path d="M 100 100 L 100 28 L 138 60 Z" fill="#1F2630" transform="rotate(240 100 100)"/>
+        <path d="M 100 100 L 100 28 L 138 60 Z" fill="#252C38" transform="rotate(300 100 100)"/>
+        <circle cx="100" cy="100" r="22" fill="#2EB872"/>
+        <path d="M 90 100 L 98 108 L 112 92" fill="none" stroke="#F7F4EC" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="100" cy="100" r="78" fill="none" stroke="#7B5BE6" stroke-width="2"/>
+      </svg>
+      revelio &middot; host dependency audit
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/a-magdy/revelio" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/a-magdy/revelio/issues" target="_blank" rel="noopener">Issues</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
