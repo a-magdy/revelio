@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" width="120" alt="Revelio logo" />
+</p>
+
 # revelio
 
 [![CI](https://github.com/a-magdy/revelio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/a-magdy/revelio/actions/workflows/ci.yml)
