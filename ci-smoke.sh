@@ -115,6 +115,9 @@ main() {
   fi
   diff_out="$("$CLI_ENTRYPOINT" diff "$diff_run_a" "$diff_run_b" --format json 2>&1)" || {
     print_error "Smoke test failed: diff command failed"
+    printf '%s\n' "----- diff command output -----" >&2
+    printf '%s\n' "$diff_out" >&2
+    printf '%s\n' "-------------------------------" >&2
     rm -rf "$diff_tmp"
     return 1
   }
