@@ -1,12 +1,21 @@
-<p align="center">
-  <img src="assets/logo.svg" width="120" alt="Revelio logo" />
-</p>
+<div align="center">
+  <img src="assets/logo.svg" width="100" alt="Revelio logo" /><br /><br />
+  <h1>revelio</h1>
+  <p>Host-level dependency audit CLI for macOS and Linux</p>
+  <p>
+    <a href="https://github.com/a-magdy/revelio/actions/workflows/ci.yml"><img src="https://github.com/a-magdy/revelio/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+    &nbsp;
+    <img src="https://img.shields.io/badge/Bash-4%2B-7B5BE6?style=flat&logo=gnubash&logoColor=white" alt="Bash 4+" />
+    &nbsp;
+    <img src="https://img.shields.io/badge/platform-macOS_%2B_Linux-7B5BE6?style=flat" alt="macOS + Linux" />
+    &nbsp;
+    <img src="https://img.shields.io/badge/no_cloud-required-2EB872?style=flat" alt="No cloud required" />
+    &nbsp;
+    <img src="https://img.shields.io/badge/no_account-required-2EB872?style=flat" alt="No account required" />
+  </p>
+</div>
 
-# revelio
-
-[![CI](https://github.com/a-magdy/revelio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/a-magdy/revelio/actions/workflows/ci.yml)
-
-**Host-level dependency audit CLI for macOS and Linux.**
+---
 
 Revelio inventories the tools installed on your machine, checks what is outdated, correlates findings across multiple vulnerability sources, and tells you which top-level package is responsible. It is designed for the stuff project-scoped scanners miss: global CLIs, language toolchains, package-manager installs, and transitive dependencies already living on your laptop.
 
