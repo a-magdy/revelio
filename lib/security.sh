@@ -467,21 +467,39 @@ security_print_report_summary() {
     local advisory_count
     advisory_count="$(jq 'length' "$advisories_file")"
     if [[ "$advisory_count" -gt 0 ]]; then
-      printf '  %-10s %-8s %-18s %-18s %-12s %-12s %-22s %s\n' "SEVERITY" "MANAGER" "PACKAGE" "PARENT" "INSTALLED" "UPGRADE TO" "STATUS" "VULNS"
-      printf '  %-10s %-8s %-18s %-18s %-12s %-12s %-22s %s\n' "--------" "-------" "-------" "------" "---------" "----------" "------" "-----"
-      jq -r '.[] | "  \(.highestSeverity | ascii_upcase | .[0:10] | . + " " * (10 - length))\(.manager | .[0:8] | . + " " * (8 - length))\(.package | .[0:18] | . + " " * (18 - length))\((.primaryParent // .package // "unknown") | .[0:18] | . + " " * (18 - length))\(.installedVersion | .[0:12] | . + " " * (12 - length))\((.recommendedVersion // "n/a") | .[0:12] | . + " " * (12 - length))\((.remediationStatus // "n/a") | .[0:22] | . + " " * (22 - length))\(.vulnerabilityCount)"' "$advisories_file"
+      printf '%s  %-10s %-8s %-18s %-18s %-12s %-12s %-22s %s%s\n' \
+        "$_C_BOLD" "SEVERITY" "MANAGER" "PACKAGE" "PARENT" "INSTALLED" "UPGRADE TO" "STATUS" "VULNS" "$_C_RESET"
+      printf '%s  %-10s %-8s %-18s %-18s %-12s %-12s %-22s %s%s\n' \
+        "$_C_DIM" "--------" "-------" "-------" "------" "---------" "----------" "------" "-----" "$_C_RESET"
+      # Padding is computed inside jq before injecting escape codes to preserve column alignment.
+      jq -r \
+        --arg c_crit "$_C_CRIT" \
+        --arg c_high "$_C_HIGH" \
+        --arg c_med  "$_C_MED" \
+        --arg c_low  "$_C_LOW" \
+        --arg c_dim  "$_C_DIM" \
+        --arg c_rst  "$_C_RESET" \
+        '.[] |
+          (if   .highestSeverity == "critical" then $c_crit
+           elif .highestSeverity == "high"     then $c_high
+           elif .highestSeverity == "medium"   then $c_med
+           elif .highestSeverity == "low"      then $c_low
+           else $c_dim end) as $col |
+          (.highestSeverity | ascii_upcase | .[0:10] | . + " " * (10 - length)) as $sev |
+          "  \($col)\($sev)\($c_rst)\(.manager | .[0:8] | . + " " * (8 - length))\(.package | .[0:18] | . + " " * (18 - length))\((.primaryParent // .package // "unknown") | .[0:18] | . + " " * (18 - length))\(.installedVersion | .[0:12] | . + " " * (12 - length))\((.recommendedVersion // "n/a") | .[0:12] | . + " " * (12 - length))\((.remediationStatus // "n/a") | .[0:22] | . + " " * (22 - length))\(.vulnerabilityCount)"' \
+        "$advisories_file"
       printf '\n'
 
       #--- Dependency tree paths
       local has_dep_paths
       has_dep_paths="$(jq '[.[] | select((.dependencyPaths | length) > 0)] | length' "$advisories_file")"
       if [[ "$has_dep_paths" -gt 0 ]]; then
-        printf '  🌳 DEPENDENCY TREE:\n'
+        printf '%s  🌳 DEPENDENCY TREE:%s\n' "${_C_PURPLE}${_C_BOLD}" "$_C_RESET"
         jq -r '.[] | select((.dependencyPaths | length) > 0) | "  → \(.package)@\(.installedVersion):\n\(.dependencyPaths | map("    " + .) | join("\n"))\n"' "$advisories_file"
       fi
 
       #--- Attack risk descriptions
-      printf '  ⚡ ATTACK RISK SUMMARY:\n'
+      printf '%s  ⚡ ATTACK RISK SUMMARY:%s\n' "${_C_PURPLE}${_C_BOLD}" "$_C_RESET"
       jq -r '.[] | select((.attackDescriptions | length) > 0) | "  → \(.package)@\(.installedVersion): \(.attackDescriptions | join("; "))"' "$advisories_file"
       printf '\n'
 
@@ -489,7 +507,7 @@ security_print_report_summary() {
       local has_upgrade_commands
       has_upgrade_commands="$(jq '[.[] | select((.upgradeCommand // "") != "")] | length' "$advisories_file")"
       if [[ "$has_upgrade_commands" -gt 0 ]]; then
-        printf '  🛠️  UPGRADE COMMANDS:\n'
+        printf '%s  🛠️  UPGRADE COMMANDS:%s\n' "${_C_PURPLE}${_C_BOLD}" "$_C_RESET"
         jq -r '.[] | select((.upgradeCommand // "") != "") | "  → \(.manager): \(.package)\n    parent: \(.primaryParent // "unknown")\n    command: \(.upgradeCommand)\n"' "$advisories_file"
       fi
 
@@ -497,7 +515,7 @@ security_print_report_summary() {
       local has_pending_release
       has_pending_release="$(jq '[.[] | select(.remediationStatus == "upstream-pending-release")] | length' "$advisories_file")"
       if [[ "$has_pending_release" -gt 0 ]]; then
-        printf '  ⏳ HANG TIGHT (pending stable release):\n'
+        printf '%s  ⏳ HANG TIGHT (pending stable release):%s\n' "${_C_PURPLE}${_C_BOLD}" "$_C_RESET"
         jq -r '.[] | select(.remediationStatus == "upstream-pending-release") | "  → \(.manager): \(.package)\n    root: \(.rootPackage // "unknown")\n    \(.remediationMessage // .upgradeRationale // "Pending release-channel signal found.")\n"' "$advisories_file"
       fi
 
@@ -505,7 +523,7 @@ security_print_report_summary() {
       local has_actionable
       has_actionable="$(jq '[.[] | select(.highestSeverity == "critical" or .highestSeverity == "high") | select((.remediationStatus // "") == "actionable-update-now") | select(.recommendedVersion != null)] | length' "$advisories_file")"
       if [[ "$has_actionable" -gt 0 ]]; then
-        printf '  📋 UPGRADE RATIONALE (critical/high only):\n'
+        printf '%s  📋 UPGRADE RATIONALE (critical/high only):%s\n' "${_C_PURPLE}${_C_BOLD}" "$_C_RESET"
         jq -r '.[] | select(.highestSeverity == "critical" or .highestSeverity == "high") | select((.remediationStatus // "") == "actionable-update-now") | select(.recommendedVersion != null) | "  → \(.manager): \(.package) \(.installedVersion) → \(.recommendedVersion)\n    parent: \(.primaryParent // "unknown")\n    \(.remediationMessage // .upgradeRationale)\n    suggested command: \(.upgradeCommand // "n/a")\n"' "$advisories_file"
       fi
     fi
@@ -520,7 +538,7 @@ security_print_report_summary() {
   printf '\n'
 
   #--- File locations
-  printf '  📁 KEY FILES:\n'
+  printf '%s  📁 KEY FILES:%s\n' "${_C_PURPLE}${_C_BOLD}" "$_C_RESET"
   printf '     Report:          %s\n' "$report_file"
   [[ -n "$findings_file" ]]  && printf '     Vulnerabilities:  %s\n' "$findings_file"
   [[ -n "$advisories_file" ]] && printf '     Advisories:       %s\n' "$advisories_file"
