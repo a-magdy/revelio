@@ -85,6 +85,19 @@ platform_linux_distro() {
   printf '%s\n' "unknown"
 }
 
+# Read the Linux distribution VERSION_ID from /etc/os-release.
+# Useful for building OSV ecosystem identifiers like "Debian:12" or "Ubuntu:22.04".
+# Outputs: VERSION_ID value, or empty string if unavailable.
+platform_linux_os_version_id() {
+  if [[ "$(platform_os)" != "linux" ]]; then
+    return 0
+  fi
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    ( . /etc/os-release && printf '%s\n' "${VERSION_ID:-}" )
+  fi
+}
+
 #===================================================================================================
 # Default paths
 #===================================================================================================
@@ -129,6 +142,11 @@ EOF
 ~/.local/share/pipx/venvs
 ~/.cargo/bin
 ~/go/bin
+/var/lib/dpkg
+/var/lib/rpm
+/var/lib/pacman/local
+/var/lib/snapd
+/var/lib/flatpak
 EOF
       ;;
   esac
@@ -148,7 +166,9 @@ EOF
       ;;
     linux)
       cat <<'EOF'
-/usr/local/bin
+/usr/local
+/opt
+~/.local
 /var/lib/flatpak/app
 ~/.local/share/flatpak/app
 /snap

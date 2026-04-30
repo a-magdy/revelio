@@ -1,3 +1,16 @@
 .DS_Store
 *.swp
 *.swo
+
+# Local revelio runs may be created here when developing
+.revelio/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.bak
+*.bak.*
+
+# Local-only config overrides (never commit secrets like REVELIO_GIT_TOKEN)
+.env
+.env.local

@@ -1,0 +1,18 @@
+# Arch Linux smoke harness for the Revelio CLI.
+# Exercises the pacman collector path on an arch-family base.
+# Arch is a rolling distro so we use the :latest tag; pin via digest if reproducibility matters.
+FROM archlinux:latest
+
+RUN pacman -Syu --noconfirm \
+  && pacman -S --noconfirm --needed \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    shellcheck \
+  && pacman -Scc --noconfirm
+ 
+WORKDIR /work
+
+CMD ["bash", "./ci-smoke.sh"]

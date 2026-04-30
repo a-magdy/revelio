@@ -218,6 +218,29 @@ main() {
     fi
   fi
 
+  print_info "Running Linux native package manager smoke checks (best-effort)..."
+  local packages_file linux_mgr linux_bin checked=0
+  packages_file="$run_dir/inventory/packages.json"
+  # Map: collector toggle <-> manager value emitted in packages.json.
+  # Each entry is "<binary>:<manager>". We only assert when the binary exists
+  # on the host (so this loop is a no-op on macOS).
+  for entry in "dpkg-query:dpkg" "rpm:rpm" "pacman:pacman" "snap:snap" "flatpak:flatpak"; do
+    linux_bin="${entry%%:*}"
+    linux_mgr="${entry##*:}"
+    if ! command -v "$linux_bin" >/dev/null 2>&1; then
+      continue
+    fi
+    checked=$((checked + 1))
+    if ! jq -e --arg m "$linux_mgr" 'any(.[]; .manager == $m)' "$packages_file" >/dev/null; then
+      print_error "Smoke test failed: $linux_bin present on host but no $linux_mgr packages in inventory"
+      return 1
+    fi
+    print_info "  ✓ $linux_mgr inventory contains at least one package"
+  done
+  if [[ "$checked" -eq 0 ]]; then
+    print_info "  (no Linux package manager binaries present on this host; skipped)"
+  fi
+
   print_success "Revelio standalone CLI smoke checks passed"
 }
 
