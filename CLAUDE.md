@@ -15,6 +15,8 @@ Revelio is a standalone host dependency audit CLI for macOS and Linux. It invent
 ├── revelio.sh              # CLI entrypoint
 ├── revelio.config.json     # Default runtime configuration
 ├── ci-smoke.sh             # Smoke tests (run before committing)
+├── Formula/
+│   └── revelio.rb          # Homebrew formula (in-repo tap; wrapper-shim install pinned to brew bash)
 ├── assets/
 │   ├── logo.svg            # Brand logo (standalone SVG)
 │   ├── social-preview.svg  # GitHub social card source
@@ -106,6 +108,12 @@ shellcheck -x revelio.sh lib/core.sh lib/file.sh lib/security.sh
 
 # Smoke tests (run before committing)
 ./ci-smoke.sh
+
+# Homebrew formula (local validation)
+brew install --build-from-source ./Formula/revelio.rb
+brew test revelio
+brew audit --strict --formula ./Formula/revelio.rb   # `license`/bottle warnings expected
+brew uninstall revelio
 ```
 
 ## Safety Notes

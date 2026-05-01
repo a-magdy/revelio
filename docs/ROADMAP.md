@@ -68,27 +68,93 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 
 ### A — Homebrew tap formula
 
-- **Status**: proposed
-- **Goal**: users can `brew tap a-magdy/revelio && brew install revelio`.
+- **Status**: in-progress (formula written + v0.1.0 released; **brew validation
+  + README install section still pending**)
+- **Goal**: users can `brew tap a-magdy/revelio https://github.com/a-magdy/revelio && brew install revelio`.
 - **Why**: by far the highest-leverage discovery channel for a macOS-first CLI.
   Standard expectation from the target audience.
-- **Steps**:
-  1. Create a separate repo `a-magdy/homebrew-revelio` with `Formula/revelio.rb`.
-  2. Formula: `url`/`sha256` point at the latest release tarball;
-     `depends_on "bash"`, `"jq"`, `"curl"`; `bin.install "revelio.sh" => "revelio"`;
-     `libexec.install "lib", "revelio.config.json"`.
-  3. `test do` runs `system "#{bin}/revelio", "--version"`.
-  4. Wire `revelio` to the right `libexec` paths so `lib/` resolves correctly when
-     the script is invoked from `/usr/local/bin` (use `SCRIPT_DIR` resolution that
-     follows symlinks; revisit `revelio.sh:48`).
-  5. Add `brew` install instructions to README "Quick start".
-  6. **Later**: submit to `homebrew-core` once API is stable and 30+ stars.
-- **Files / artifacts**: external `homebrew-revelio` repo; possibly small change
-  in `revelio.sh` to follow symlinks for `SCRIPT_DIR`.
-- **Dependencies**: I.
-- **Acceptance**: `brew tap a-magdy/revelio && brew install revelio && revelio --version`
-  works on a clean macOS machine; `brew test revelio` passes.
-- **Effort**: medium.
+
+#### What landed (commits `f11a05a`, `b6cd1b0`, plus formula commit)
+
+- `lib/security.sh`: `REVELIO_VERSION="0.1.0"`.
+- `revelio.sh`: schedule entrypoint honors `REVELIO_INVOCATION_PATH`
+  (env var the brew shim sets) so launchd/cron call the shim, not the raw
+  libexec script under macOS bash 3.2.
+- `Formula/revelio.rb`: in-repo formula with wrapper-shim install.
+- Tag `v0.1.0` + GitHub Release `v0.1.0` exist.
+- Tarball URL: `https://github.com/a-magdy/revelio/archive/refs/tags/v0.1.0.tar.gz`
+  sha256: `0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5`
+  (locked into the formula).
+
+#### Architecture decisions (locked)
+
+- **Location**: `Formula/` directory in this repo (not a separate
+  `a-magdy/homebrew-revelio` tap). Easy to split later.
+- **Install UX (current)**: `brew tap a-magdy/revelio https://github.com/a-magdy/revelio`
+  (explicit URL required while in this repo).
+- **lib/ resolution**: wrapper-shim approach — brew installs `revelio.sh`,
+  `revelio.config.json`, `lib/` into `libexec/`; `bin/revelio` is a `/bin/bash`
+  shim that exports `REVELIO_INVOCATION_PATH=$0` and execs brew bash 5 against
+  `libexec/revelio.sh`. Sidesteps the `SCRIPT_DIR` symlink trap entirely; no
+  changes to `revelio.sh:48` needed.
+- **License stanza**: omitted until LICENSE lands (tracked in `LAUNCH.md`).
+  `brew audit --strict` warns but doesn't fail.
+
+#### Remaining steps (resume here)
+
+1. **Phase 4 — Local brew validation** (run on a macOS box with brew):
+   ```bash
+   brew install --build-from-source ./Formula/revelio.rb
+   revelio --version                      # expect: revelio 0.1.0
+   revelio --help                         # exits 0
+   revelio inventory --offline            # exits 0; confirms lib/ resolves
+   revelio schedule install --cadence daily --at 09:00 --mode scan
+   # inspect ~/Library/LaunchAgents/<id>.plist:
+   #   <string> MUST reference /opt/homebrew/bin/revelio (the shim),
+   #   NOT .../libexec/revelio.sh
+   revelio schedule uninstall
+   brew test revelio
+   brew audit --strict --formula ./Formula/revelio.rb
+   #   expected warnings: missing `license` stanza, possibly "no bottle"
+   brew uninstall revelio
+   ```
+
+2. **Phase 5 — README install section**: add an `## Install` section before
+   `## Quick start` with:
+   ````markdown
+   ### Homebrew (macOS, Linuxbrew)
+
+   ```bash
+   brew tap a-magdy/revelio https://github.com/a-magdy/revelio
+   brew install revelio
+   ```
+
+   > The explicit URL is required while the formula lives in this repo. Once
+   > the formula moves to a dedicated tap, bare `brew tap a-magdy/revelio`
+   > will work.
+   ````
+
+3. Flip this track's status to `done` once Phase 4 + 5 are complete.
+
+#### Risks (already mitigated, re-check during Phase 4)
+
+- **Schedule plist points at libexec, not the shim** → mitigated by
+  `REVELIO_INVOCATION_PATH`; verify in step 1.
+- **License audit warning** → expected, not a blocker.
+
+#### Future
+
+- **Submit to `homebrew-core`**: once public + ~30 stars + API stable.
+- **Split into dedicated `a-magdy/homebrew-revelio` tap**: enables the bare
+  `brew tap a-magdy/revelio` UX. One `git mv` + redirect notice.
+
+- **Files / artifacts**: `Formula/revelio.rb` (in-repo), README install
+  section, ROADMAP status flip.
+- **Dependencies**: I (release automation) for *future* releases. v0.1.0 was
+  cut manually.
+- **Acceptance**: all Phase 4 commands pass on a clean macOS machine; README
+  documents the install.
+- **Effort**: medium (≈80% complete; remaining work is brew validation + README).
 
 ### D — `install.sh` one-liner
 
