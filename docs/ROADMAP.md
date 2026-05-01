@@ -102,6 +102,9 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 
 #### Remaining steps (resume here)
 
+> Phase 4 and Phase 5 are **independent** — Phase 5 (README) is pure markdown
+> and can land first; Phase 4 (brew validation) needs a macOS box with brew.
+
 1. **Phase 4 — Local brew validation** (run on a macOS box with brew):
    ```bash
    brew install --build-from-source ./Formula/revelio.rb
@@ -109,9 +112,14 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
    revelio --help                         # exits 0
    revelio inventory --offline            # exits 0; confirms lib/ resolves
    revelio schedule install --cadence daily --at 09:00 --mode scan
-   # inspect ~/Library/LaunchAgents/<id>.plist:
+   # ⚠ HIGHEST-VALUE CHECK — this validates the REVELIO_INVOCATION_PATH
+   # contract between Formula/revelio.rb and revelio.sh:729. Inspect
+   # ~/Library/LaunchAgents/<id>.plist:
    #   <string> MUST reference /opt/homebrew/bin/revelio (the shim),
    #   NOT .../libexec/revelio.sh
+   # If it points at libexec, the wrapper-shim assumption is broken and a
+   # different fix is needed (the schedule would re-enter under macOS bash
+   # 3.2 via launchd's minimal PATH and fail-fast).
    revelio schedule uninstall
    brew test revelio
    brew audit --strict --formula ./Formula/revelio.rb
@@ -123,6 +131,10 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
    `## Quick start` with:
    ````markdown
    ### Homebrew (macOS, Linuxbrew)
+
+   > Requires the repo to be public — until then, only the repo owner
+   > (authenticated via `gh auth login` or git credentials) can `brew tap`
+   > this URL.
 
    ```bash
    brew tap a-magdy/revelio https://github.com/a-magdy/revelio
@@ -139,8 +151,31 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 #### Risks (already mitigated, re-check during Phase 4)
 
 - **Schedule plist points at libexec, not the shim** → mitigated by
-  `REVELIO_INVOCATION_PATH`; verify in step 1.
+  `REVELIO_INVOCATION_PATH`; verify in step 1 (highest-value check).
 - **License audit warning** → expected, not a blocker.
+- **`brew tap` requires repo to be public** — chicken-and-egg with `LAUNCH.md`.
+  Validation works for the owner; broader install only after the repo flips
+  public.
+
+#### Maintenance: cutting future releases
+
+Until track I (release automation) lands, every release requires this
+manual recipe — and the formula sha256 must be updated **in lockstep**
+with the new tag:
+
+```bash
+# 1. Bump REVELIO_VERSION in lib/security.sh
+# 2. Tag and release
+git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
+gh release create vX.Y.Z --generate-notes
+# 3. Compute and update sha256 + url in Formula/revelio.rb
+curl -sL "https://github.com/a-magdy/revelio/archive/refs/tags/vX.Y.Z.tar.gz" \
+  | shasum -a 256
+```
+
+`v0.1.0` is permanent. Source/lib bugs found in Phase 4 require cutting
+`v0.1.1` and updating the formula's `url` + `sha256`. Formula-only changes
+(e.g. adding a missing `depends_on`) can ship without a new tag.
 
 #### Future
 

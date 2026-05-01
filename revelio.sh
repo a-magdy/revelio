@@ -726,6 +726,12 @@ _run_schedule() {
             print_error "Unknown schedule install option: $1"; return 1 ;;
         esac
       done
+      # REVELIO_INVOCATION_PATH is set by the Homebrew wrapper shim
+      # (Formula/revelio.rb) to the user-facing path of the shim itself, so
+      # launchd/cron entries point at the brew-bash-pinned wrapper rather than
+      # at libexec/revelio.sh (which would re-enter under macOS bash 3.2 and
+      # fail-fast). Empty for direct/git-clone invocations — falls back to $0.
+      # Do not break this contract without updating Formula/revelio.rb too.
       schedule_install "$cadence" "$at" "$mode" "${REVELIO_INVOCATION_PATH:-$SCRIPT_DIR/$(basename "$0")}" "$publish_after"
       ;;
     uninstall)
