@@ -29,7 +29,7 @@ REVELIO_LAST_RUN_DIR=""
 # Single source of truth for the tool version. Surfaced via `revelio --version`,
 # stamped into every `report.json` as `toolVersion`, and used by `revelio diff`
 # to decide whether two reports were produced by compatible tool versions.
-REVELIO_VERSION="0.2.0-dev"
+REVELIO_VERSION="0.1.0"
 
 # Schema version for `report.json`. Bump when the report shape changes in a way
 # that consumers (diff, publish, downstream tooling) need to detect.

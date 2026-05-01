@@ -726,7 +726,7 @@ _run_schedule() {
             print_error "Unknown schedule install option: $1"; return 1 ;;
         esac
       done
-      schedule_install "$cadence" "$at" "$mode" "$SCRIPT_DIR/$(basename "$0")" "$publish_after"
+      schedule_install "$cadence" "$at" "$mode" "${REVELIO_INVOCATION_PATH:-$SCRIPT_DIR/$(basename "$0")}" "$publish_after"
       ;;
     uninstall)
       schedule_uninstall
