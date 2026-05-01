@@ -58,6 +58,10 @@ Things to do before or immediately after making the repo public.
 
 ## Suggested Additions for the First Public Release
 
+> For the deeper, ongoing backlog of OSS-CLI improvements (Homebrew tap, install
+> script, shell completions, HTML report, demo recording, bats tests, OSV cache,
+> release automation, self-update, Dependabot, Scorecard) see [`ROADMAP.md`](ROADMAP.md).
+
 These aren't blockers, but they'd make a strong first impression:
 
 | Idea | Value | Effort |
