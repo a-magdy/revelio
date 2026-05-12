@@ -327,12 +327,12 @@ See `docker/README.md` for details and how to add a new distro.
 
 ## Contributing
 
-Revelio is in early development. Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/a-magdy/revelio/issues). If you would like to contribute code, please open an issue first to discuss the change.
+Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/a-magdy/revelio/issues). For contribution guidelines and local validation steps, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
-If you discover a vulnerability in Revelio itself, please report it privately via [GitHub Security Advisories](https://github.com/a-magdy/revelio/security/advisories/new) rather than opening a public issue.
+If you discover a vulnerability in Revelio itself, please report it privately via [GitHub Security Advisories](https://github.com/a-magdy/revelio/security/advisories/new) rather than opening a public issue. See [SECURITY.md](SECURITY.md) for the reporting policy.
 
 ## License
 
-This project does not yet have a license. Until one is added, standard copyright applies. If you would like to use Revelio in your own work, please open an issue to discuss licensing.
+Revelio is licensed under the [MIT License](LICENSE).

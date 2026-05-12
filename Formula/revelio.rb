@@ -3,9 +3,7 @@ class Revelio < Formula
   homepage "https://github.com/a-magdy/revelio"
   url "https://github.com/a-magdy/revelio/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
-  # NOTE: `license` stanza intentionally omitted until a LICENSE file lands
-  # upstream (tracked in docs/LAUNCH.md). `brew audit --strict` will warn but
-  # not fail.
+  license "MIT"
 
   depends_on "bash"
   depends_on "jq"

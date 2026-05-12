@@ -24,22 +24,17 @@ Things to do before or immediately after making the repo public.
 
 ## Legal
 
-- [ ] **Add a license** — the README currently says "This project does not yet have a license."
-  Recommended: **MIT** (permissive, widely expected for CLI tools) or **Apache 2.0** (adds patent clause).
-  Add a `LICENSE` file at the root — GitHub can generate it for you under Settings → scroll to bottom.
+- [x] **Add a license** — the repo now ships with an MIT `LICENSE` file, and the README + Homebrew formula metadata are aligned.
 
 ---
 
 ## Community
 
-- [ ] **`CONTRIBUTING.md`** — even a short one. Cover: how to open an issue, how to run `ci-smoke.sh`, shell conventions pointer (`shell-scripts.instructions.md`).
+- [x] **`CONTRIBUTING.md`** — added with issue guidance, `ci-smoke.sh`, and the shell conventions pointer.
 
-- [ ] **Issue templates** — add `.github/ISSUE_TEMPLATE/` with two templates:
-  - `bug_report.md` — steps to reproduce, OS, Bash version, manager versions
-  - `feature_request.md` — use-case, current workaround
+- [x] **Issue templates** — `.github/ISSUE_TEMPLATE/bug_report.md` and `feature_request.md` are in place.
 
-- [ ] **`SECURITY.md`** — the README already explains how to report privately; promote it to a dedicated file so GitHub shows the "Report a vulnerability" button prominently.
-  Content: point to GitHub Security Advisories (already in README).
+- [x] **`SECURITY.md`** — added with a private reporting path via GitHub Security Advisories so GitHub can surface the "Report a vulnerability" flow.
 
 ---
 

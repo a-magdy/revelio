@@ -12,6 +12,9 @@ Revelio is a standalone host dependency audit CLI for macOS and Linux. It invent
 .
 ├── README.md
 ├── CLAUDE.md
+├── CONTRIBUTING.md       # Contributor guide and local validation steps
+├── LICENSE               # MIT license for the project
+├── SECURITY.md           # Private vulnerability reporting policy
 ├── revelio.sh              # CLI entrypoint
 ├── revelio.config.json     # Default runtime configuration
 ├── ci-smoke.sh             # Smoke tests (run before committing)
@@ -36,6 +39,9 @@ Revelio is a standalone host dependency audit CLI for macOS and Linux. It invent
 │   ├── publish.sh          # `revelio publish`: push a run to the configured git repo
 │   └── security.sh         # All inventory, scanning, enrichment, and reporting logic (~3000 lines)
 └── .github/
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug_report.md   # Repro template for defects
+    │   └── feature_request.md # Use-case template for enhancements
     └── instructions/
         └── shell-scripts.instructions.md  # Bash conventions for this repo
 ```
@@ -112,7 +118,10 @@ shellcheck -x revelio.sh lib/core.sh lib/file.sh lib/security.sh
 # Homebrew formula (local validation)
 brew install --build-from-source ./Formula/revelio.rb
 brew test revelio
-brew audit --strict --formula ./Formula/revelio.rb   # `license`/bottle warnings expected
+tap="local/revelio"
+brew tap --custom-remote "$tap" "$(pwd)"
+brew audit --strict --formula "$tap/revelio"
+brew untap "$tap"
 brew uninstall revelio
 ```
 

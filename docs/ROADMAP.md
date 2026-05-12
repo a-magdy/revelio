@@ -97,8 +97,8 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
   shim that exports `REVELIO_INVOCATION_PATH=$0` and execs brew bash 5 against
   `libexec/revelio.sh`. Sidesteps the `SCRIPT_DIR` symlink trap entirely; no
   changes to `revelio.sh:48` needed.
-- **License stanza**: omitted until LICENSE lands (tracked in `LAUNCH.md`).
-  `brew audit --strict` warns but doesn't fail.
+- **License stanza**: the formula now declares `license "MIT"`, so `brew audit
+  --strict` no longer has the missing-license warning.
 
 #### Remaining steps (resume here)
 
@@ -117,15 +117,17 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
    # ~/Library/LaunchAgents/<id>.plist:
    #   <string> MUST reference /opt/homebrew/bin/revelio (the shim),
    #   NOT .../libexec/revelio.sh
-   # If it points at libexec, the wrapper-shim assumption is broken and a
-   # different fix is needed (the schedule would re-enter under macOS bash
-   # 3.2 via launchd's minimal PATH and fail-fast).
-   revelio schedule uninstall
-   brew test revelio
-   brew audit --strict --formula ./Formula/revelio.rb
-   #   expected warnings: missing `license` stanza, possibly "no bottle"
-   brew uninstall revelio
-   ```
+    # If it points at libexec, the wrapper-shim assumption is broken and a
+    # different fix is needed (the schedule would re-enter under macOS bash
+    # 3.2 via launchd's minimal PATH and fail-fast).
+    revelio schedule uninstall
+    brew test revelio
+    tap="local/revelio"
+    brew tap --custom-remote "$tap" "$(pwd)"
+    brew audit --strict --formula "$tap/revelio"
+    brew untap "$tap"
+    brew uninstall revelio
+    ```
 
 2. **Phase 5 — README install section**: add an `## Install` section before
    `## Quick start` with:
@@ -152,7 +154,6 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 
 - **Schedule plist points at libexec, not the shim** → mitigated by
   `REVELIO_INVOCATION_PATH`; verify in step 1 (highest-value check).
-- **License audit warning** → expected, not a blocker.
 - **`brew tap` requires repo to be public** — chicken-and-egg with `LAUNCH.md`.
   Validation works for the owner; broader install only after the repo flips
   public.
