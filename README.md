@@ -88,11 +88,13 @@ Network lookups (OSV, npm, pip, cargo registries) honor the standard `HTTPS_PROX
 
 ```bash
 brew tap a-magdy/revelio https://github.com/a-magdy/revelio
-brew install revelio
+brew install a-magdy/revelio/revelio
 revelio --version
 ```
 
-The formula lives in this repository, so the explicit tap URL is required. It
+The formula lives in this repository, so the explicit tap URL is required.
+Use the fully qualified name (`a-magdy/revelio/revelio`) so Homebrew never
+picks a same-named formula from another tap. It
 installs a `revelio` command that always runs under Homebrew's Bash 5, so the
 macOS Bash 3.2 caveat below does not apply, and `revelio schedule` records
 that command in launchd/cron.

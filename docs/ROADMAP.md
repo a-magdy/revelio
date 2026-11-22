@@ -70,7 +70,7 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 
 - **Status**: in-progress (formula written + v0.1.0 released; **brew validation
   pending; README install section done**)
-- **Goal**: users can `brew tap a-magdy/revelio https://github.com/a-magdy/revelio && brew install revelio`.
+- **Goal**: users can `brew tap a-magdy/revelio https://github.com/a-magdy/revelio && brew install a-magdy/revelio/revelio`.
 - **Why**: by far the highest-leverage discovery channel for a macOS-first CLI.
   Standard expectation from the target audience.
 
@@ -121,7 +121,7 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
     # different fix is needed (the schedule would re-enter under macOS bash
     # 3.2 via launchd's minimal PATH and fail-fast).
     revelio schedule uninstall
-    brew test revelio
+    brew test a-magdy/revelio/revelio
     tap="local/revelio"
     brew tap --custom-remote "$tap" "$(pwd)"
     brew audit --strict --formula "$tap/revelio"
@@ -140,7 +140,7 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 
    ```bash
    brew tap a-magdy/revelio https://github.com/a-magdy/revelio
-   brew install revelio
+   brew install a-magdy/revelio/revelio
    ```
 
    > The explicit URL is required while the formula lives in this repo. Once
