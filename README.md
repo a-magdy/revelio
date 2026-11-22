@@ -2,6 +2,7 @@
   <img src="assets/logo.svg" width="100" alt="Revelio logo" /><br /><br />
   <h1>revelio</h1>
   <p>Host-level dependency audit CLI for macOS and Linux</p>
+  <p><a href="https://a-magdy.github.io/revelio/"><strong>a-magdy.github.io/revelio</strong></a></p>
   <p>
     <a href="https://github.com/a-magdy/revelio/actions/workflows/ci.yml"><img src="https://github.com/a-magdy/revelio/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
     &nbsp;
