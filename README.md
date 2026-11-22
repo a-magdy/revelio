@@ -84,12 +84,29 @@ Network lookups (OSV, npm, pip, cargo registries) honor the standard `HTTPS_PROX
 
 ### Installation
 
+#### Homebrew (macOS, Linuxbrew)
+
+```bash
+brew tap a-magdy/revelio https://github.com/a-magdy/revelio
+brew install revelio
+revelio --version
+```
+
+The formula lives in this repository, so the explicit tap URL is required. It
+installs a `revelio` command that always runs under Homebrew's Bash 5, so the
+macOS Bash 3.2 caveat below does not apply, and `revelio schedule` records
+that command in launchd/cron.
+
+#### From source
+
 ```bash
 git clone https://github.com/a-magdy/revelio.git
 cd revelio
+./revelio.sh --version
 ```
 
-No build step required. The CLI runs directly from the repository.
+No build step required. The CLI runs directly from the repository. The
+examples below use `./revelio.sh`; with Homebrew, use `revelio` instead.
 
 ### Run it
 

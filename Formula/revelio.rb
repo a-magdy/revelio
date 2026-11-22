@@ -1,9 +1,16 @@
 class Revelio < Formula
   desc "Host-level dependency audit CLI for macOS and Linux"
   homepage "https://github.com/a-magdy/revelio"
-  url "https://github.com/a-magdy/revelio/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
+  # Pinned by tag + commit over git rather than a release tarball + sha256:
+  # GitHub's archive tarballs can only be hashed once the repo is public, and
+  # the old sha256 here was the hash of a "Not Found" response. A git pin is
+  # verifiable before and after the repo goes public.
+  url "https://github.com/a-magdy/revelio.git",
+      using:    :git,
+      tag:      "v0.1.0",
+      revision: "b6cd1b0b9a92708b9c1750389fee88ba1722591b"
   license "MIT"
+  head "https://github.com/a-magdy/revelio.git", branch: "main"
 
   depends_on "bash"
   depends_on "jq"
@@ -26,7 +33,7 @@ class Revelio < Formula
   end
 
   test do
-    assert_match "revelio 0.1.0", shell_output("#{bin}/revelio --version")
+    assert_match "revelio #{version}", shell_output("#{bin}/revelio --version")
     system bin/"revelio", "--help"
   end
 end
