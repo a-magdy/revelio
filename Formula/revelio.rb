@@ -7,8 +7,8 @@ class Revelio < Formula
   # verifiable before and after the repo goes public.
   url "https://github.com/a-magdy/revelio.git",
       using:    :git,
-      tag:      "v0.1.0",
-      revision: "b6cd1b0b9a92708b9c1750389fee88ba1722591b"
+      tag:      "v0.1.1",
+      revision: "04ffd292723ff3b83d52e764fd24af4683a0b8c2"
   license "MIT"
   head "https://github.com/a-magdy/revelio.git", branch: "main"
 
