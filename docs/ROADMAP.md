@@ -69,7 +69,7 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 ### A — Homebrew tap formula
 
 - **Status**: in-progress (formula written + v0.1.0 released; **brew validation
-  + README install section still pending**)
+  pending; README install section done**)
 - **Goal**: users can `brew tap a-magdy/revelio https://github.com/a-magdy/revelio && brew install revelio`.
 - **Why**: by far the highest-leverage discovery channel for a macOS-first CLI.
   Standard expectation from the target audience.
@@ -82,9 +82,9 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
   libexec script under macOS bash 3.2.
 - `Formula/revelio.rb`: in-repo formula with wrapper-shim install.
 - Tag `v0.1.0` + GitHub Release `v0.1.0` exist.
-- Tarball URL: `https://github.com/a-magdy/revelio/archive/refs/tags/v0.1.0.tar.gz`
-  sha256: `0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5`
-  (locked into the formula).
+- The formula pins `tag "v0.1.0"` + `revision "b6cd1b0…"` over git. The
+  tarball sha256 it used before (`0019dfc4…`) was the hash of GitHub's
+  9-byte "Not Found" response, recorded while the repo was private.
 
 #### Architecture decisions (locked)
 
@@ -129,7 +129,7 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
     brew uninstall revelio
     ```
 
-2. **Phase 5 — README install section**: add an `## Install` section before
+2. **Phase 5 — README install section** (done): add an `## Install` section before
    `## Quick start` with:
    ````markdown
    ### Homebrew (macOS, Linuxbrew)
@@ -161,7 +161,7 @@ Start with **I**; A/D/J unblock once releases produce signed tarballs.
 #### Maintenance: cutting future releases
 
 Until track I (release automation) lands, every release requires this
-manual recipe — and the formula sha256 must be updated **in lockstep**
+manual recipe — and the formula tag + revision must be updated **in lockstep**
 with the new tag:
 
 ```bash
@@ -169,13 +169,12 @@ with the new tag:
 # 2. Tag and release
 git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
 gh release create vX.Y.Z --generate-notes
-# 3. Compute and update sha256 + url in Formula/revelio.rb
-curl -sL "https://github.com/a-magdy/revelio/archive/refs/tags/vX.Y.Z.tar.gz" \
-  | shasum -a 256
+# 3. Update tag + revision in Formula/revelio.rb
+git rev-parse "vX.Y.Z^{commit}"
 ```
 
 `v0.1.0` is permanent. Source/lib bugs found in Phase 4 require cutting
-`v0.1.1` and updating the formula's `url` + `sha256`. Formula-only changes
+`v0.1.1` and updating the formula's `tag` + `revision`. Formula-only changes
 (e.g. adding a missing `depends_on`) can ship without a new tag.
 
 #### Future
